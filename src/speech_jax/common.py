@@ -1,14 +1,13 @@
-import jax
-
-import jax.numpy as jnp
-from flax import shard, jax_utils
-from flax.training import train_state
 import dataclasses
 from typing import Callable
-import wandb
-from tqdm.auto import tqdm
 
+import jax
+import jax.numpy as jnp
+import wandb
 from datasets import IterableDataset
+from flax import jax_utils, shard
+from flax.training import train_state
+from tqdm.auto import tqdm
 
 
 class DataLoader:
@@ -51,8 +50,12 @@ class Trainer:
         train_batch_size = self.config.train_batch_size * jax.device_count()
         eval_batch_size = self.config.eval_batch_size * jax.device_count()
 
-        train_data = DataLoader(train_data, batch_size=train_batch_size, collate_fn=self.collate_fn)
-        val_data = DataLoader(val_data, batch_size=eval_batch_size, collate_fn=self.collate_fn)
+        train_data = DataLoader(
+            train_data, batch_size=train_batch_size, collate_fn=self.collate_fn
+        )
+        val_data = DataLoader(
+            val_data, batch_size=eval_batch_size, collate_fn=self.collate_fn
+        )
 
         state = jax_utils.replicate(state)
 
@@ -70,10 +73,12 @@ class Trainer:
                 avg_tr_loss += loss
 
                 if step % self.config.logging_steps == 0:
-                    logger.log({
-                        "tr_loss": tr_loss.item() / self.config.logging_steps,
-                        "avg_tr_loss": avg_tr_loss.item() / (step + 1),
-                    })
+                    logger.log(
+                        {
+                            "tr_loss": tr_loss.item() / self.config.logging_steps,
+                            "avg_tr_loss": avg_tr_loss.item() / (step + 1),
+                        }
+                    )
                     tr_loss = jnp.array(0)
 
             val_loss = self.evaluate(val_data, state)

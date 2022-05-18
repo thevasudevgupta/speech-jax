@@ -1,27 +1,25 @@
-import jax
-import flax
-
-import jax.numpy as jnp
-from flax import traverse_util
-from flax.training import train_state
-import optax
 from typing import Callable
 
+import flax
+import jax
+import jax.numpy as jnp
+import optax
+from flax import traverse_util
+from flax.training import train_state
 from transformers import FlaxWav2Vec2ForCTC
 
 model_id = "facebook/wav2vec2-base"
 model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 
-from speech_jax import DataLoader, TrainerConfig, Trainer
-
 import dataclasses
-from tqdm.auto import tqdm
-
 from functools import partial
+from typing import Any, Dict, List, Optional
 
+from tqdm.auto import tqdm
+from transformers import Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor
 
-from typing import List, Dict, Any, Optional
-from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2CTCTokenizer
+from speech_jax import DataLoader, Trainer, TrainerConfig
+
 
 @flax.struct.dataclass
 class TrainState(train_state.TrainState):
@@ -31,9 +29,15 @@ class TrainState(train_state.TrainState):
 def create_tx(lr, weight_decay):
     def weight_decay_mask(params):
         params = traverse_util.flatten_dict(params)
-        mask = {k: (v[-1] != "bias" and v[-2:] != ("LayerNorm", "scale")) for k, v in params.items()}
+        mask = {
+            k: (v[-1] != "bias" and v[-2:] != ("LayerNorm", "scale"))
+            for k, v in params.items()
+        }
         return traverse_util.unflatten_dict(mask)
-    tx = optax.adamw(learning_rate=lr, weight_decay=weight_decay, mask=weight_decay_mask)
+
+    tx = optax.adamw(
+        learning_rate=lr, weight_decay=weight_decay, mask=weight_decay_mask
+    )
     return tx
 
 
@@ -51,7 +55,9 @@ def training_step(batch, state, drp_rng: jnp.DeviceArray):
 
     def loss_fn(params):
         targets = batch.pop("targets")
-        outputs = state.apply({"params": params}, **batch, dropout_rng=drp_rng, train=True)
+        outputs = state.apply(
+            {"params": params}, **batch, dropout_rng=drp_rng, train=True
+        )
         return state.loss_fn(targets, outputs)
 
     grad_fn = jax.value_and_grad(loss_fn)
@@ -72,6 +78,7 @@ def validation_step(batch, state):
     loss = jax.lax.pmean(loss, axis_name="batch")
     return loss
 
+
 @dataclasses.dataclass
 class DataCollator:
     feature_extractor: Wav2Vec2FeatureExtractor
@@ -84,14 +91,28 @@ class DataCollator:
         text = [sample["text"] for sample in batch]
 
         # TODO: explore other padding options in JAX (special dynamic padding?)
-        audio = self.feature_extractor(audio, padding="max_length", max_length=self.audio_max_len, truncation=True, return_tensors="np")
-        text = self.tokenizer(text, max_length=self.text_max_len, truncation=True, padding="max_length", return_tensors="np")
+        audio = self.feature_extractor(
+            audio,
+            padding="max_length",
+            max_length=self.audio_max_len,
+            truncation=True,
+            return_tensors="np",
+        )
+        text = self.tokenizer(
+            text,
+            max_length=self.text_max_len,
+            truncation=True,
+            padding="max_length",
+            return_tensors="np",
+        )
         return audio, text
 
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
 tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
-collate_fn = DataCollator(feature_extractor, tokenizer, audio_max_len=256000, text_max_len=16)
+collate_fn = DataCollator(
+    feature_extractor, tokenizer, audio_max_len=256000, text_max_len=16
+)
 
 trainer_config = TrainerConfig(
     max_epochs=30,
@@ -110,6 +131,7 @@ trainer = Trainer(
 
 
 from datasets import interleave_datasets, load_dataset
+
 train_data = [
     load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
     load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),

@@ -1,9 +1,11 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
-import jax
+
 
 def hey(x):
     return x + np.random.rand(*x.shape)
+
 
 x = np.array([2, 3])
 
@@ -24,8 +26,10 @@ for _ in range(2):
 
 print("correct hey_jit")
 
+
 def correct_hey_jit(x, r):
     return x + r
+
 
 np.random.seed(0)
 hey_jit = jax.jit(hey)
