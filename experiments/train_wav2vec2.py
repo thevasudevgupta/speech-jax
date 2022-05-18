@@ -2,7 +2,7 @@ import jax
 import flax
 
 import jax.numpy as jnp
-from flax import traverse_util, shard
+from flax import traverse_util
 from flax.training import train_state
 import optax
 from typing import Callable
@@ -12,6 +12,16 @@ from transformers import FlaxWav2Vec2ForCTC
 model_id = "facebook/wav2vec2-base"
 model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 
+from speech_jax import DataLoader, TrainerConfig, Trainer
+
+import dataclasses
+from tqdm.auto import tqdm
+
+from functools import partial
+
+
+from typing import List, Dict, Any, Optional
+from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2CTCTokenizer
 
 @flax.struct.dataclass
 class TrainState(train_state.TrainState):
@@ -33,12 +43,6 @@ state = TrainState.create(
     tx=create_tx(1e-4, 1e-4),
     loss_fn=optax.ctc_loss,
 )
-
-import dataclasses
-from tqdm.auto import tqdm
-from flax import jax_utils
-
-from functools import partial
 
 
 @partial(jax.pmap, axis_name="batch")
@@ -68,64 +72,33 @@ def validation_step(batch, state):
     loss = jax.lax.pmean(loss, axis_name="batch")
     return loss
 
-
 @dataclasses.dataclass
-class TrainerConfig:
-    max_epochs: int
-    wandb_project_name: str = "speech-JAX"
+class DataCollator:
+    feature_extractor: Wav2Vec2FeatureExtractor
+    tokenizer: Wav2Vec2CTCTokenizer
+    audio_max_len: Optional[int] = None
+    text_max_len: Optional[int] = None
 
-import wandb
+    def __call__(self, batch: List[Dict[str, Any]]):
+        audio = [sample["audio"]["array"] for sample in batch]
+        text = [sample["text"] for sample in batch]
 
-@dataclasses.dataclass
-class Trainer:
-    config: TrainerConfig
-    datacollator: Callable
-    training_step: Callable
-    validation_step: Callable
-    state: train_state.TrainState
-
-    def train(self, train_data, val_data):
-        logger = wandb.init(project=self.config.wandb_project_name)
-
-        state = jax_utils.replicate(state)
-
-        rng = jax.random.PRNGKey(0)
-        drp_rng = jax.random.split(rng, jax.device_count())
-
-        for epoch in range(self.config.max_epochs):
-            tr_loss = jnp.array(0)
-            for step, batch in tqdm(enumerate(train_data)):
-                batch = self.datacollator(batch)
-                batch = shard(batch)
-                loss, drp_rng = self.training_step(batch, state, drp_rng)
-
-                tr_loss += jax_utils.unreplicate(loss)
-                if step % self.config.logging_steps == 0:
-                    logger.log({"tr_loss": tr_loss.item()})
-                    tr_loss = jnp.array(0)
-
-            val_loss = self.evaluate(val_data)
-            logger.log({"val_loss": val_loss.item(), "epoch": epoch})
-
-    def evaluate(self, data):
-        val_loss = jnp.array(0)
-        for batch in tqdm(data):
-            batch = self.datacollator(batch)
-            batch = shard(batch)
-            loss = self.validation_step(batch, state)
-            val_loss += jax_utils.unreplicate(loss)
-        return val_loss
+        # TODO: explore other padding options in JAX (special dynamic padding?)
+        audio = self.feature_extractor(audio, padding="max_length", max_length=self.audio_max_len, truncation=True, return_tensors="np")
+        text = self.tokenizer(text, max_length=self.text_max_len, truncation=True, padding="max_length", return_tensors="np")
+        return audio, text
 
 
-def collate_fn(batch):
-    return batch
-
+feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
+tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
+collate_fn = DataCollator(feature_extractor, tokenizer, audio_max_len=256000, text_max_len=16)
 
 trainer_config = TrainerConfig(
     max_epochs=30,
+    train_batch_size_per_device=2,
+    eval_batch_size_per_device=2,
     wandb_project_name="speech-JAX",
 )
-
 
 trainer = Trainer(
     config=trainer_config,
@@ -134,3 +107,20 @@ trainer = Trainer(
     validation_step=validation_step,
     state=state,
 )
+
+
+from datasets import interleave_datasets, load_dataset
+train_data = [
+    load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
+    load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
+    load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
+]
+train_data = interleave_datasets(train_data)
+val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
+
+
+dataloader = DataLoader(train_data, batch_size=4, collate_fn=collate_fn)
+
+for batch in tqdm(dataloader):
+    print(batch)
+    break
