@@ -5,8 +5,9 @@ import jax
 import jax.numpy as jnp
 import wandb
 from datasets import IterableDataset
-from flax import jax_utils, shard
+from flax import jax_utils
 from flax.training import train_state
+from flax.training.common_utils import shard
 from tqdm.auto import tqdm
 
 
@@ -19,13 +20,14 @@ class DataLoader:
     def __iter__(self):
         batch = []
         for i, sample in enumerate(self.dataset):
-            if i == self.batch_size:
-                break
             batch.append(sample)
 
-        if self.collate_fn is not None:
-            batch = self.collate_fn(batch)
-        return batch
+            if (i + 1) % self.batch_size == 0:
+                if self.collate_fn is not None:
+                    batch = self.collate_fn(batch)
+
+                yield batch
+                batch = []
 
 
 @dataclasses.dataclass

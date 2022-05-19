@@ -1,4 +1,6 @@
-from typing import Callable
+import dataclasses
+from functools import partial
+from typing import Any, Callable, Dict, List, Optional
 
 import flax
 import jax
@@ -6,22 +8,13 @@ import jax.numpy as jnp
 import optax
 from flax import traverse_util
 from flax.training import train_state
-from transformers import FlaxWav2Vec2ForCTC
-
-model_id = "facebook/wav2vec2-base"
-model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
-
-import dataclasses
-from functools import partial
-from typing import Any, Dict, List, Optional
-
 from tqdm.auto import tqdm
-from transformers import Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor
+from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
+                          Wav2Vec2FeatureExtractor)
 
-from speech_jax import DataLoader, Trainer, TrainerConfig
+from speech_jax.training import Trainer, TrainerConfig
 
 
-@flax.struct.dataclass
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
 
@@ -41,12 +34,15 @@ def create_tx(lr, weight_decay):
     return tx
 
 
-state = TrainState.create(
-    apply_fn=model.__call__,
-    params=model.params,
-    tx=create_tx(1e-4, 1e-4),
-    loss_fn=optax.ctc_loss,
-)
+model_id = "facebook/wav2vec2-large-lv60"
+# model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
+
+# state = TrainState.create(
+#     apply_fn=model.__call__,
+#     params=model.params,
+#     tx=create_tx(1e-4, 1e-4),
+#     loss_fn=optax.ctc_loss,
+# )
 
 
 @partial(jax.pmap, axis_name="batch")
@@ -91,21 +87,27 @@ class DataCollator:
         text = [sample["text"] for sample in batch]
 
         # TODO: explore other padding options in JAX (special dynamic padding?)
-        audio = self.feature_extractor(
-            audio,
-            padding="max_length",
-            max_length=self.audio_max_len,
-            truncation=True,
-            return_tensors="np",
-        )
-        text = self.tokenizer(
-            text,
-            max_length=self.text_max_len,
-            truncation=True,
-            padding="max_length",
-            return_tensors="np",
-        )
-        return audio, text
+        # audio = self.feature_extractor(
+        #     audio,
+        #     padding="max_length",
+        #     max_length=self.audio_max_len,
+        #     truncation=True,
+        #     return_tensors="np",
+        # )
+        # text = self.tokenizer(
+        #     text,
+        #     max_length=self.text_max_len,
+        #     truncation=True,
+        #     padding="max_length",
+        #     return_tensors="np",
+        # )
+        # return audio, text
+        return (text,)
+
+
+# TODO (for fine-tuning):
+# need to freeze feature extractor
+#
 
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
@@ -121,28 +123,30 @@ trainer_config = TrainerConfig(
     wandb_project_name="speech-JAX",
 )
 
-trainer = Trainer(
-    config=trainer_config,
-    datacollator=collate_fn,
-    training_step=training_step,
-    validation_step=validation_step,
-    state=state,
-)
+# trainer = Trainer(
+#     config=trainer_config,
+#     datacollator=collate_fn,
+#     training_step=training_step,
+#     validation_step=validation_step,
+#     state=state,
+# )
 
 
 from datasets import interleave_datasets, load_dataset
 
 train_data = [
     load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
-    load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
-    load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
+    # load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
+    # load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
 ]
 train_data = interleave_datasets(train_data)
-val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
+# val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
 
+
+from speech_jax.training import DataLoader
 
 dataloader = DataLoader(train_data, batch_size=4, collate_fn=collate_fn)
 
+i = 0
 for batch in tqdm(dataloader):
     print(batch)
-    break
