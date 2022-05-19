@@ -33,17 +33,6 @@ def create_tx(lr, weight_decay):
     return tx
 
 
-model_id = "facebook/wav2vec2-large-lv60"
-model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
-
-state = TrainState.create(
-    apply_fn=model.__call__,
-    params=model.params,
-    tx=create_tx(1e-4, 1e-4),
-    loss_fn=optax.ctc_loss,
-)
-
-
 @partial(jax.pmap, axis_name="batch")
 def training_step(batch, state, drp_rng: jnp.DeviceArray):
     new_drp_rng, drp_rng = jax.random.split(drp_rng, num=2)
@@ -107,6 +96,15 @@ class DataCollator:
 # need to freeze feature extractor
 #
 
+model_id = "facebook/wav2vec2-large-lv60"
+model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
+
+state = TrainState.create(
+    apply_fn=model.__call__,
+    params=model.params,
+    tx=create_tx(1e-4, 1e-4),
+    loss_fn=optax.ctc_loss,
+)
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
 tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
@@ -123,10 +121,9 @@ trainer_config = TrainerConfig(
 
 trainer = Trainer(
     config=trainer_config,
-    datacollator=collate_fn,
+    collate_fn=collate_fn,
     training_step=training_step,
     validation_step=validation_step,
-    state=state,
 )
 
 
@@ -139,3 +136,10 @@ train_data = [
 ]
 train_data = interleave_datasets(train_data)
 val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
+
+
+try:
+    state = trainer.train(state, train_data, val_data)
+except KeyboardInterrupt:
+    print("Interrupting training through KEYBOARD!!")
+    trainer.save_checkpoint(state, "interrupted-final-model")
