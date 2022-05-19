@@ -8,7 +8,6 @@ import jax.numpy as jnp
 import optax
 from flax import traverse_util
 from flax.training import train_state
-from tqdm.auto import tqdm
 from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
                           Wav2Vec2FeatureExtractor)
 
@@ -35,14 +34,14 @@ def create_tx(lr, weight_decay):
 
 
 model_id = "facebook/wav2vec2-large-lv60"
-# model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
+model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 
-# state = TrainState.create(
-#     apply_fn=model.__call__,
-#     params=model.params,
-#     tx=create_tx(1e-4, 1e-4),
-#     loss_fn=optax.ctc_loss,
-# )
+state = TrainState.create(
+    apply_fn=model.__call__,
+    params=model.params,
+    tx=create_tx(1e-4, 1e-4),
+    loss_fn=optax.ctc_loss,
+)
 
 
 @partial(jax.pmap, axis_name="batch")
@@ -87,22 +86,21 @@ class DataCollator:
         text = [sample["text"] for sample in batch]
 
         # TODO: explore other padding options in JAX (special dynamic padding?)
-        # audio = self.feature_extractor(
-        #     audio,
-        #     padding="max_length",
-        #     max_length=self.audio_max_len,
-        #     truncation=True,
-        #     return_tensors="np",
-        # )
-        # text = self.tokenizer(
-        #     text,
-        #     max_length=self.text_max_len,
-        #     truncation=True,
-        #     padding="max_length",
-        #     return_tensors="np",
-        # )
-        # return audio, text
-        return (text,)
+        audio = self.feature_extractor(
+            audio,
+            padding="max_length",
+            max_length=self.audio_max_len,
+            truncation=True,
+            return_tensors="np",
+        )
+        text = self.tokenizer(
+            text,
+            max_length=self.text_max_len,
+            truncation=True,
+            padding="max_length",
+            return_tensors="np",
+        )
+        return audio, text
 
 
 # TODO (for fine-tuning):
@@ -117,36 +115,27 @@ collate_fn = DataCollator(
 )
 
 trainer_config = TrainerConfig(
-    max_epochs=30,
+    max_epochs=2,
     train_batch_size_per_device=2,
     eval_batch_size_per_device=2,
     wandb_project_name="speech-JAX",
 )
 
-# trainer = Trainer(
-#     config=trainer_config,
-#     datacollator=collate_fn,
-#     training_step=training_step,
-#     validation_step=validation_step,
-#     state=state,
-# )
+trainer = Trainer(
+    config=trainer_config,
+    datacollator=collate_fn,
+    training_step=training_step,
+    validation_step=validation_step,
+    state=state,
+)
 
 
 from datasets import interleave_datasets, load_dataset
 
 train_data = [
     load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
-    # load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
-    # load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
+    load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
+    load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
 ]
 train_data = interleave_datasets(train_data)
-# val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
-
-
-from speech_jax.training import DataLoader
-
-dataloader = DataLoader(train_data, batch_size=4, collate_fn=collate_fn)
-
-i = 0
-for batch in tqdm(dataloader):
-    print(batch)
+val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)

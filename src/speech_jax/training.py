@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Union
 
 import jax
 import jax.numpy as jnp
@@ -9,6 +10,8 @@ from flax import jax_utils
 from flax.training import train_state
 from flax.training.common_utils import shard
 from tqdm.auto import tqdm
+
+PathType = Union[Path, str]
 
 
 class DataLoader:
@@ -93,3 +96,18 @@ class Trainer:
             loss = self.validation_step(batch, state)
             val_loss += jax_utils.unreplicate(loss)
         return val_loss
+
+    def save_checkpoint(self, ckpt_dir: PathType) -> Path:
+        ckpt_dir = Path(ckpt_dir)
+        ckpt_dir.mkdir(exist_ok=True)
+        # TODO: add logic here
+        # directory saving
+        # flax model in flax_model.msgpack
+        # optim state in optim_state.msgpack
+        # model config in config.yaml
+        # training config in ...
+
+        return ckpt_dir
+
+    def load_checkpoint(self, ckpt_dir: PathType):
+        ...
