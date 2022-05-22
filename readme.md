@@ -18,5 +18,12 @@ pytest -sv tests/
 ### Usage
 
 ```python
-from speech_jax.training import DataLoader, Trainer, TrainerConfig
+from speech_jax import training
+
+config = training.TrainerConfig(...)
+trainer = training.Trainer(config, ...)
+state = trainer.train(...)
+# state will be lost if you don't return it (hence, make sure you return it)
+
+trainer.save_checkpoint(state, "ckpt_dir")
 ```

@@ -3,3 +3,4 @@ flax
 optax
 wandb
 tqdm
+pyyaml

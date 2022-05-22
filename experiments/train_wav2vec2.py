@@ -1,5 +1,4 @@
 import dataclasses
-from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
 import flax
@@ -11,11 +10,13 @@ from flax.training import train_state
 from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
                           Wav2Vec2FeatureExtractor)
 
-from speech_jax.training import Trainer, TrainerConfig
-
+import numpy as np
+from speech_jax import training
+from functools import partial
 
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
+    get_feat_extract_output_lengths: Callable = flax.struct.field(pytree_node=False)
 
 
 def create_tx(lr, weight_decay):
@@ -33,34 +34,52 @@ def create_tx(lr, weight_decay):
     return tx
 
 
-@partial(jax.pmap, axis_name="batch")
-def training_step(batch, state, drp_rng: jnp.DeviceArray):
+def training_step(state: train_state.TrainState, drp_rng: jnp.DeviceArray, batch: Dict[str, jnp.Array]):
     new_drp_rng, drp_rng = jax.random.split(drp_rng, num=2)
 
     def loss_fn(params):
-        targets = batch.pop("targets")
-        outputs = state.apply(
+        labels = batch.pop("labels")
+        label_paddings = batch.pop("label_paddings")
+
+        input_lengths = jnp.sum(batch["attention_mask"], axis=1)
+        input_lengths = state.get_feat_extract_output_lengths(input_lengths)
+
+        seqlen = batch["attention_mask"].shape[-1]
+        logit_paddings = input_lengths[..., None] <= jnp.arange(seqlen)
+
+        logits = state.apply(
             {"params": params}, **batch, dropout_rng=drp_rng, train=True
         )
-        return state.loss_fn(targets, outputs)
+
+        return state.loss_fn(logits, logit_paddings, labels, label_paddings)
 
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(state.params)
+
     loss = jax.lax.pmean(loss, axis_name="batch")
     grads = jax.lax.pmean(grads, axis_name="batch")
 
-    loss = state.apply_gradient(grads)
+    new_state = state.apply_gradient(grads)
 
-    return loss, new_drp_rng
+    return new_state, new_drp_rng, loss
 
 
-@partial(jax.pmap, axis_name="batch")
-def validation_step(batch, state):
-    targets = batch.pop("targets")
-    outputs = state.apply({"params": state.params}, **batch, train=False)
-    loss = state.loss_fn(targets, outputs)
+def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.Array]):
+    labels = batch.pop("labels")
+    label_paddings = batch.pop("label_paddings")
+
+    input_lengths = jnp.sum(batch["attention_mask"], axis=1)
+    input_lengths = state.get_feat_extract_output_lengths(input_lengths)
+
+    seqlen = batch["attention_mask"].shape[-1]
+    logit_paddings = input_lengths[..., None] <= jnp.arange(seqlen)
+
+    logits = state.apply({"params": state.params}, **batch, train=False)
+
+    loss = state.loss_fn(logits, logit_paddings, labels, label_paddings)
+
     loss = jax.lax.pmean(loss, axis_name="batch")
-    return loss
+    return state, loss
 
 
 @dataclasses.dataclass
@@ -82,35 +101,34 @@ class DataCollator:
             truncation=True,
             return_tensors="np",
         )
-        text = self.tokenizer(
+        targets = self.tokenizer(
             text,
             max_length=self.text_max_len,
             truncation=True,
             padding="max_length",
             return_tensors="np",
         )
-        return audio, text
+        labels = targets["input_ids"]
+        label_paddings = np.cast(targets["attention_mask"] == 0, np.int32)
+
+        return {
+            "input_values": audio["input_values"],
+            "attention_mask": audio["attention_mask"],
+            "labels": labels,
+            "label_paddings": label_paddings,
+        }
+
+
+class TrainerConfig(training.TrainerConfig):
+    lr: float
+    weight_decay: float
 
 
 # TODO (for fine-tuning):
 # need to freeze feature extractor
-#
 
 model_id = "facebook/wav2vec2-large-lv60"
 model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
-
-state = TrainState.create(
-    apply_fn=model.__call__,
-    params=model.params,
-    tx=create_tx(1e-4, 1e-4),
-    loss_fn=optax.ctc_loss,
-)
-
-feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
-tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
-collate_fn = DataCollator(
-    feature_extractor, tokenizer, audio_max_len=256000, text_max_len=16
-)
 
 trainer_config = TrainerConfig(
     max_epochs=2,
@@ -119,11 +137,18 @@ trainer_config = TrainerConfig(
     wandb_project_name="speech-JAX",
 )
 
-trainer = Trainer(
+feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
+tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
+collate_fn = DataCollator(
+    feature_extractor, tokenizer, audio_max_len=256000, text_max_len=16
+)
+
+trainer = training.Trainer(
     config=trainer_config,
-    collate_fn=collate_fn,
     training_step=training_step,
     validation_step=validation_step,
+    pmap_kwargs={"axis_name": "batch", "donate_argnums": (0, 1)},
+    collate_fn=collate_fn,
 )
 
 
@@ -131,15 +156,24 @@ from datasets import interleave_datasets, load_dataset
 
 train_data = [
     load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
-    load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
-    load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
+    # load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
+    # load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
 ]
 train_data = interleave_datasets(train_data)
 val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
 
 
+state = TrainState.create(
+    apply_fn=model.__call__,
+    params=model.params,
+    tx=create_tx(trainer_config.lr, trainer_config.weight_decay),
+    loss_fn=partial(optax.ctc_loss, blank_id=tokenizer.pad_token_id),
+    get_feat_extract_output_lengths=model._get_feat_extract_output_lengths,
+)
+
 try:
     state = trainer.train(state, train_data, val_data)
 except KeyboardInterrupt:
     print("Interrupting training through KEYBOARD!!")
-    trainer.save_checkpoint(state, "interrupted-final-model")
+
+model.save_pretrained("final-model", params=state.params)
