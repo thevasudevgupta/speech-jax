@@ -51,7 +51,7 @@ def training_step(
         logit_paddings = input_lengths[..., None] <= jnp.arange(seqlen)
 
         logits = state.apply(
-            {"params": params}, **batch, dropout_rng=drp_rng, train=True
+            {"params": params}, **batch, dropout_rng=drp_rng, train=True, freeze_feature_encoder=True
         )
 
         return state.loss_fn(logits, logit_paddings, labels, label_paddings)
@@ -128,7 +128,7 @@ class TrainerConfig(training.TrainerConfig):
 
 
 # TODO (for fine-tuning):
-# need to freeze feature extractor
+# work on mask_time_indices
 
 model_id = "facebook/wav2vec2-large-lv60"
 model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
