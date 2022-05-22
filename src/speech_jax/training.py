@@ -11,11 +11,14 @@ from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
 from tqdm.auto import tqdm
-# from huggingface_hub import Repository
 
 import wandb
 
 from .data_utils import HFIterableDataLoader
+
+# from huggingface_hub import Repository
+
+
 
 PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
@@ -30,6 +33,7 @@ class TrainerConfig:
     eval_batch_size_per_device: int
     wandb_project_name: str
     epochs_save_dir: str
+    logging_steps: int
 
 
 @dataclasses.dataclass
@@ -83,7 +87,7 @@ class Trainer:
                 tr_loss += loss
                 avg_tr_loss += loss
 
-                if step % self.config.logging_steps == 0:
+                if (step + 1) % self.config.logging_steps == 0:
                     logger.log(
                         {
                             "tr_loss": tr_loss.item() / self.config.logging_steps,
@@ -99,7 +103,9 @@ class Trainer:
                 val_loss += jax_utils.unreplicate(loss)
             logger.log({"val_loss": val_loss.item(), "epoch": epoch})
 
-            self.save_checkpoint(jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}")
+            self.save_checkpoint(
+                jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}"
+            )
 
         return jax_utils.unreplicate(state)
 

@@ -96,6 +96,7 @@ class DataCollator:
             max_length=self.audio_maxlen,
             truncation=True,
             return_tensors="np",
+            sampling_rate=16000,
         )
         targets = self.tokenizer(
             text,
@@ -131,12 +132,13 @@ model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 
 trainer_config = TrainerConfig(
     max_epochs=30,
-    lr=2e-4,
-    weight_decay=1e-3,
-    train_batch_size_per_device=16,
-    eval_batch_size_per_device=16,
+    lr=5e-5,
+    weight_decay=1e-4,
+    train_batch_size_per_device=2,  # colab-T4
+    eval_batch_size_per_device=2,
     wandb_project_name="speech-JAX",
     epochs_save_dir="epochs",
+    logging_steps=1,
 )
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
