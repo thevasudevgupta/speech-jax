@@ -4,3 +4,4 @@ optax
 wandb
 tqdm
 pyyaml
+huggingface_hub

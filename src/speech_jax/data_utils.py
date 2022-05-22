@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from datasets import IterableDataset
 
 
-class DataLoader:
+class HFIterableDataLoader:
     def __init__(
         self,
         dataset: IterableDataset,
@@ -28,3 +28,9 @@ class DataLoader:
 
                 yield batch
                 batch = []
+
+    def shuffle(self, seed):
+        self.dataset = self.dataset.shuffle(seed)
+
+    def set_epoch(self, epoch):
+        self.dataset.set_epoch(epoch)

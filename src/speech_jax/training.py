@@ -1,6 +1,6 @@
 import dataclasses
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -11,10 +11,11 @@ from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
 from tqdm.auto import tqdm
+from huggingface_hub import Repository
 
 import wandb
 
-from .data_utils import DataLoader
+from .data_utils import HFIterableDataLoader
 
 PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
@@ -51,10 +52,12 @@ class Trainer:
         train_batch_size = self.config.train_batch_size_per_device * jax.device_count()
         eval_batch_size = self.config.eval_batch_size_per_device * jax.device_count()
 
-        train_data = DataLoader(
+        train_data = HFIterableDataLoader(
             train_data, batch_size=train_batch_size, collate_fn=self.collate_fn
         )
-        val_data = DataLoader(
+        train_data.shuffle(seed)
+
+        val_data = HFIterableDataLoader(
             val_data, batch_size=eval_batch_size, collate_fn=self.collate_fn
         )
 
@@ -65,14 +68,12 @@ class Trainer:
         rng = jax.random.PRNGKey(seed)
         drp_rng = jax.random.split(rng, jax.device_count())
 
-        # drp_rng = rng
-        # training_step = self.training_step
-
         epochs_save_dir = Path(self.config.epochs_save_dir)
         epochs_save_dir.mkdir(exist_ok=True)
 
         for epoch in range(self.config.max_epochs):
             tr_loss, avg_tr_loss = jnp.array(0), jnp.array(0)
+            train_data.set_epoch(epoch)
             for step, batch in tqdm(enumerate(train_data)):
                 batch = shard(batch)
 
@@ -103,6 +104,10 @@ class Trainer:
             )
 
         return jax_utils.unreplicate(state)
+
+    def push_to_hfhub(self, ckpt_dir, clone_from):
+        repo = Repository(ckpt_dir, clone_from=clone_from, use_auth_token=True)
+        repo.push_to_hub(commit_message="speech_jax 🔥")
 
     def save_checkpoint(
         self, state: train_state.TrainState, ckpt_dir: PathType, extra: Dict[str, Any]

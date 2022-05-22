@@ -82,8 +82,8 @@ def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceAr
 class DataCollator:
     feature_extractor: Wav2Vec2FeatureExtractor
     tokenizer: Wav2Vec2CTCTokenizer
-    audio_max_len: Optional[int] = None
-    text_max_len: Optional[int] = None
+    audio_maxlen: Optional[int] = None
+    text_maxlen: Optional[int] = None
 
     def __call__(self, batch: List[Dict[str, Any]]):
         audio = [sample["audio"]["array"] for sample in batch]
@@ -93,13 +93,13 @@ class DataCollator:
         audio = self.feature_extractor(
             audio,
             padding="max_length",
-            max_length=self.audio_max_len,
+            max_length=self.audio_maxlen,
             truncation=True,
             return_tensors="np",
         )
         targets = self.tokenizer(
             text,
-            max_length=self.text_max_len,
+            max_length=self.text_maxlen,
             truncation=True,
             padding="max_length",
             return_tensors="np",
@@ -124,15 +124,17 @@ class TrainerConfig(training.TrainerConfig):
 # TODO (for fine-tuning):
 # work on mask_time_indices
 
+print(jax.devices())
+
 model_id = "facebook/wav2vec2-large-lv60"
 model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 
 trainer_config = TrainerConfig(
-    max_epochs=2,
-    lr=1e-4,
+    max_epochs=30,
+    lr=2e-4,
     weight_decay=1e-3,
-    train_batch_size_per_device=2,
-    eval_batch_size_per_device=2,
+    train_batch_size_per_device=16,
+    eval_batch_size_per_device=16,
     wandb_project_name="speech-JAX",
     epochs_save_dir="epochs",
 )
@@ -140,7 +142,7 @@ trainer_config = TrainerConfig(
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
 tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
 collate_fn = DataCollator(
-    feature_extractor, tokenizer, audio_max_len=256000, text_max_len=16
+    feature_extractor, tokenizer, audio_maxlen=246000, text_maxlen=256
 )
 
 trainer = training.Trainer(
@@ -177,3 +179,4 @@ except KeyboardInterrupt:
     print("Interrupting training through KEYBOARD!!")
 
 model.save_pretrained("final-model", params=state.params)
+trainer.push_to_hfhub("final-model", "vasudevgupta/speech_jax")
