@@ -1,18 +1,18 @@
 import dataclasses
 from pathlib import Path
-from typing import Callable, Union, Dict, Tuple, Optional, Any
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import jax
 import jax.numpy as jnp
-import wandb
+import yaml
 from datasets import IterableDataset
 from flax import jax_utils
+from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
 from tqdm.auto import tqdm
 
-from flax.serialization import to_bytes, from_bytes
-import yaml
+import wandb
 
 PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
@@ -21,12 +21,19 @@ TRAINING_STATE_PATH = "training_state.yaml"
 
 
 class DataLoader:
-    def __init__(self, dataset: IterableDataset, batch_size: int = 1, collate_fn: Optional[Callable] = None):
+    def __init__(
+        self,
+        dataset: IterableDataset,
+        batch_size: int = 1,
+        collate_fn: Optional[Callable] = None,
+    ):
         self.dataset = dataset
         self.batch_size = batch_size
         self.collate_fn = collate_fn
 
-    def __iter__(self) -> Union[Tuple[jnp.ndarray], Dict[str, jnp.ndarray], jnp.ndarray]:
+    def __iter__(
+        self,
+    ) -> Union[Tuple[jnp.ndarray], Dict[str, jnp.ndarray], jnp.ndarray]:
         batch = []
         for i, sample in enumerate(self.dataset):
             batch.append(sample)
@@ -111,11 +118,15 @@ class Trainer:
                 val_loss += jax_utils.unreplicate(loss)
             logger.log({"val_loss": val_loss.item(), "epoch": epoch})
 
-            self.save_checkpoint(jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}")
+            self.save_checkpoint(
+                jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}"
+            )
 
         return jax_utils.unreplicate(state)
 
-    def save_checkpoint(self, state: train_state.TrainState, ckpt_dir: PathType, extra: Dict[str, Any]) -> Path:
+    def save_checkpoint(
+        self, state: train_state.TrainState, ckpt_dir: PathType, extra: Dict[str, Any]
+    ) -> Path:
         # state must be unreplicated
 
         ckpt_dir = Path(ckpt_dir)

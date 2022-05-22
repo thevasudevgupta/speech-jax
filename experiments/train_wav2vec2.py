@@ -1,18 +1,19 @@
 import dataclasses
+from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
 import flax
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 from flax import traverse_util
 from flax.training import train_state
 from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
                           Wav2Vec2FeatureExtractor)
 
-import numpy as np
 from speech_jax import training
-from functools import partial
+
 
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
@@ -34,7 +35,9 @@ def create_tx(lr, weight_decay):
     return tx
 
 
-def training_step(state: train_state.TrainState, drp_rng: jnp.DeviceArray, batch: Dict[str, jnp.Array]):
+def training_step(
+    state: train_state.TrainState, drp_rng: jnp.DeviceArray, batch: Dict[str, jnp.Array]
+):
     new_drp_rng, drp_rng = jax.random.split(drp_rng, num=2)
 
     def loss_fn(params):
