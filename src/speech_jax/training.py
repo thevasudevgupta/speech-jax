@@ -11,7 +11,7 @@ from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
 from tqdm.auto import tqdm
-from huggingface_hub import Repository
+# from huggingface_hub import Repository
 
 import wandb
 
@@ -99,23 +99,20 @@ class Trainer:
                 val_loss += jax_utils.unreplicate(loss)
             logger.log({"val_loss": val_loss.item(), "epoch": epoch})
 
-            self.save_checkpoint(
-                jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}"
-            )
+            self.save_checkpoint(jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}")
 
         return jax_utils.unreplicate(state)
-
-    def push_to_hfhub(self, ckpt_dir, clone_from):
-        repo = Repository(ckpt_dir, clone_from=clone_from, use_auth_token=True)
-        repo.push_to_hub(commit_message="speech_jax 🔥")
 
     def save_checkpoint(
         self, state: train_state.TrainState, ckpt_dir: PathType, extra: Dict[str, Any]
     ) -> Path:
-        # state must be unreplicated
+        # state must be unreplicated before passing it
 
         ckpt_dir = Path(ckpt_dir)
         ckpt_dir.mkdir(exist_ok=True)
+
+        # repo = Repository(ckpt_dir, clone_from=self.config.clone_from, use_auth_token=True)
+        # with repo.commit("speech_jax 🔥"):
 
         training_state = {
             "config": self.config.to_dict(),

@@ -178,5 +178,6 @@ try:
 except KeyboardInterrupt:
     print("Interrupting training through KEYBOARD!!")
 
-model.save_pretrained("final-model", params=state.params)
-trainer.push_to_hfhub("final-model", "vasudevgupta/speech_jax")
+model.save_pretrained("final-model", params=state.params, push_to_hub=True)
+feature_extractor.save_pretrained("final-model", push_to_hub=True)
+tokenizer.save_pretrained("final-model", push_to_hub=True)
