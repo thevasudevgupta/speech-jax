@@ -19,10 +19,16 @@ pytest -sv tests/
 
 ```python
 from speech_jax import training
+from flax.tx_utils import create_tx
+from flax.training import train_state
 
 config = training.TrainerConfig(...)
 trainer = training.Trainer(config, ...)
-state = trainer.train(...)
+
+tx = create_tx(...)
+
+state = train_state.TrainState.create(..., tx=tx)
+state = trainer.train(state, train_data, val_data)
 # state will be lost if you don't return it (hence, make sure you return it)
 
 trainer.save_checkpoint(state, "ckpt_dir")

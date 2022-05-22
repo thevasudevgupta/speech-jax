@@ -14,36 +14,12 @@ from tqdm.auto import tqdm
 
 import wandb
 
+from .data_utils import DataLoader
+
 PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
 MODEL_PATH = "flax_model.msgpack"
 TRAINING_STATE_PATH = "training_state.yaml"
-
-
-class DataLoader:
-    def __init__(
-        self,
-        dataset: IterableDataset,
-        batch_size: int = 1,
-        collate_fn: Optional[Callable] = None,
-    ):
-        self.dataset = dataset
-        self.batch_size = batch_size
-        self.collate_fn = collate_fn
-
-    def __iter__(
-        self,
-    ) -> Union[Tuple[jnp.ndarray], Dict[str, jnp.ndarray], jnp.ndarray]:
-        batch = []
-        for i, sample in enumerate(self.dataset):
-            batch.append(sample)
-
-            if (i + 1) % self.batch_size == 0:
-                if self.collate_fn is not None:
-                    batch = self.collate_fn(batch)
-
-                yield batch
-                batch = []
 
 
 @dataclasses.dataclass
@@ -51,8 +27,8 @@ class TrainerConfig:
     max_epochs: int
     train_batch_size_per_device: int
     eval_batch_size_per_device: int
-    wandb_project_name: str = "speech-JAX"
-    epochs_save_dir: str = "epochs"
+    wandb_project_name: str
+    epochs_save_dir: str
 
 
 @dataclasses.dataclass
@@ -60,7 +36,7 @@ class Trainer:
     config: TrainerConfig
     training_step: Callable
     validation_step: Callable
-    pmap_kwargs: Dict[str, Any] = {}
+    pmap_kwargs: dataclasses.field(default_factory=dict)
     collate_fn: Optional[Callable] = None
 
     def train(
@@ -89,6 +65,9 @@ class Trainer:
         rng = jax.random.PRNGKey(seed)
         drp_rng = jax.random.split(rng, jax.device_count())
 
+        # drp_rng = rng
+        # training_step = self.training_step
+
         epochs_save_dir = Path(self.config.epochs_save_dir)
         epochs_save_dir.mkdir(exist_ok=True)
 
@@ -96,6 +75,7 @@ class Trainer:
             tr_loss, avg_tr_loss = jnp.array(0), jnp.array(0)
             for step, batch in tqdm(enumerate(train_data)):
                 batch = shard(batch)
+
                 state, drp_rng, loss = training_step(state, drp_rng, batch)
                 loss = jax_utils.unreplicate(loss)
 
