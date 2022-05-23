@@ -66,16 +66,16 @@ def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceAr
 
     input_lengths = jnp.sum(batch["attention_mask"], axis=1)
     input_lengths = state.get_feat_extract_output_lengths(input_lengths)
-
-    seqlen = batch["attention_mask"].shape[-1]
-    logit_paddings = input_lengths[..., None] <= jnp.arange(seqlen)
-
+    
     outputs = state.apply_fn(**batch, params=state.params, train=False)
+
+    seqlen = outputs.logits.shape[1]
+    logit_paddings = input_lengths[..., None] <= jnp.arange(seqlen)
 
     loss = state.loss_fn(outputs.logits, logit_paddings, labels, label_paddings).mean()
     loss = jax.lax.pmean(loss, axis_name="batch")
 
-    return state, loss
+    return loss
 
 
 @dataclasses.dataclass

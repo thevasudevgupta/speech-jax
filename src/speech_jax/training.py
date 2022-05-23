@@ -99,7 +99,7 @@ class Trainer:
             val_loss = jnp.array(0)
             for batch in tqdm(val_data):
                 batch = shard(batch)
-                state, loss = validation_step(state, batch)
+                loss = validation_step(state, batch)
                 val_loss += jax_utils.unreplicate(loss)
             logger.log({"val_loss": val_loss.item(), "epoch": epoch})
 
