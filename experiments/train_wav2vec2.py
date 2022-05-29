@@ -185,6 +185,7 @@ try:
 except KeyboardInterrupt:
     print("Interrupting training through KEYBOARD!!")
 
-model.save_pretrained("final-model", params=state.params, push_to_hub=True)
-feature_extractor.save_pretrained("final-model", push_to_hub=True)
-tokenizer.save_pretrained("final-model", push_to_hub=True)
+model_id = "jax-wav2vec2-100h"
+model.save_pretrained(model_id, params=state.params, push_to_hub=True)
+feature_extractor.save_pretrained(model_id, push_to_hub=True)
+tokenizer.save_pretrained(model_id, push_to_hub=True)

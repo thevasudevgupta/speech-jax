@@ -47,6 +47,9 @@ class TrainerConfig:
     epochs_save_dir: str
     logging_steps: int
 
+    def to_dict(self):
+        return dataclasses.asdict(self)
+    
 
 @dataclasses.dataclass
 class Trainer:
@@ -55,6 +58,7 @@ class Trainer:
     validation_step: Callable
     pmap_kwargs: dataclasses.field(default_factory=dict)
     collate_fn: Optional[Callable] = None
+    model_save_fn: Optional[Callable] = None
 
     def train(
         self,
@@ -123,28 +127,32 @@ class Trainer:
         return jax_utils.unreplicate(state)
 
     def save_checkpoint(
-        self, state: train_state.TrainState, ckpt_dir: PathType, extra: Dict[str, Any]
+        self, state: train_state.TrainState, ckpt_dir: PathType, extra: Optional[Dict[str, Any]] = None
     ) -> Path:
         # state must be unreplicated before passing it
 
         ckpt_dir = Path(ckpt_dir)
-        ckpt_dir.mkdir(exist_ok=True)
+        ckpt_dir.mkdir(exist_ok=True, parents=True)
 
         # repo = Repository(ckpt_dir, clone_from=self.config.clone_from, use_auth_token=True)
         # with repo.commit("speech_jax 🔥"):
 
-        training_state = {
-            "config": self.config.to_dict(),
-            "extra": extra,
-        }
-        yaml.dump(training_state, TRAINING_STATE_PATH)
+        # training_state = {
+        #     "config": self.config.to_dict(),
+        #     "extra": extra,
+        # }
+        # yaml.dump(training_state, TRAINING_STATE_PATH)
 
-        with open(ckpt_dir / MODEL_PATH) as f:
-            f.write(to_bytes(state.params))
-        with open(ckpt_dir / OPTIMIZER_STATE_PATH):
+        if self.model_save_fn is not None:
+            self.model_save_fn(ckpt_dir, params=state.params)
+        else:
+            with open(ckpt_dir / MODEL_PATH, "wb") as f:
+                f.write(to_bytes(state.params))
+        with open(ckpt_dir / OPTIMIZER_STATE_PATH, "wb") as f:
             f.write(to_bytes(state.opt_state))
 
         return ckpt_dir
 
     def load_checkpoint(self, ckpt_dir: PathType):
         ...
+    
