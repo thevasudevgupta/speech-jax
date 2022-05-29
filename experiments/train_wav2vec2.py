@@ -142,7 +142,7 @@ trainer_config = TrainerConfig(
     train_batch_size_per_device=1,
     eval_batch_size_per_device=1,
     wandb_project_name="speech-JAX",
-    epochs_save_dir="epochs",
+    epochs_save_dir="epochs-960h",
     logging_steps=1,
 )
 
@@ -165,8 +165,8 @@ from datasets import interleave_datasets, load_dataset
 
 train_data = [
     load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
-    # load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
-    # load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
+    load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
+    load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
 ]
 train_data = interleave_datasets(train_data)
 val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)

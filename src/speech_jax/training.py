@@ -49,7 +49,7 @@ class TrainerConfig:
 
     def to_dict(self):
         return dataclasses.asdict(self)
-    
+
 
 @dataclasses.dataclass
 class Trainer:
@@ -117,12 +117,13 @@ class Trainer:
                 jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}"
             )
 
-            val_loss = jnp.array(0)
+            val_steps, val_loss = 0, jnp.array(0)
             for batch in tqdm(val_data):
                 batch = shard(batch)
                 outputs = validation_step(state, batch)
                 val_loss += jax_utils.unreplicate(outputs.loss)
-            logger.log({"val_loss": val_loss.item(), "epoch": epoch})
+                val_steps += 1
+            logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})
 
         return jax_utils.unreplicate(state)
 
