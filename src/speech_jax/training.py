@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import yaml
 from datasets import IterableDataset
-from flax import jax_utils
+from flax import jax_utils, struct
 from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
@@ -24,6 +24,18 @@ PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
 MODEL_PATH = "flax_model.msgpack"
 TRAINING_STATE_PATH = "training_state.yaml"
+
+
+@struct.dataclass
+class TrainingStepOutput:
+    state: train_state.TrainState
+    dropout_rng: jnp.DeviceArray
+    loss: jnp.DeviceArray
+
+
+@struct.dataclass
+class ValidationStepOutput:
+    loss: jnp.DeviceArray
 
 
 @dataclasses.dataclass
@@ -70,7 +82,7 @@ class Trainer:
         validation_step = jax.pmap(self.validation_step, **self.pmap_kwargs)
 
         rng = jax.random.PRNGKey(seed)
-        drp_rng = jax.random.split(rng, jax.device_count())
+        dropout_rng = jax.random.split(rng, jax.device_count())
 
         epochs_save_dir = Path(self.config.epochs_save_dir)
         epochs_save_dir.mkdir(exist_ok=True)
@@ -81,8 +93,9 @@ class Trainer:
             for step, batch in tqdm(enumerate(train_data)):
                 batch = shard(batch)
 
-                state, drp_rng, loss = training_step(state, drp_rng, batch)
-                loss = jax_utils.unreplicate(loss)
+                outputs = training_step(state, dropout_rng, batch)
+                state, dropout_rng = outputs.state, outputs.dropout_rng
+                loss = jax_utils.unreplicate(outputs.loss)
 
                 tr_loss += loss
                 avg_tr_loss += loss
@@ -96,16 +109,16 @@ class Trainer:
                     )
                     tr_loss = jnp.array(0)
 
-            val_loss = jnp.array(0)
-            for batch in tqdm(val_data):
-                batch = shard(batch)
-                loss = validation_step(state, batch)
-                val_loss += jax_utils.unreplicate(loss)
-            logger.log({"val_loss": val_loss.item(), "epoch": epoch})
-
             self.save_checkpoint(
                 jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}"
             )
+
+            val_loss = jnp.array(0)
+            for batch in tqdm(val_data):
+                batch = shard(batch)
+                outputs = validation_step(state, batch)
+                val_loss += jax_utils.unreplicate(outputs.loss)
+            logger.log({"val_loss": val_loss.item(), "epoch": epoch})
 
         return jax_utils.unreplicate(state)
 

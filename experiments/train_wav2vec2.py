@@ -12,6 +12,7 @@ from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
                           Wav2Vec2FeatureExtractor)
 
 from speech_jax import training
+from speech_jax.training import TrainingStepOutput, ValidationStepOutput
 from speech_jax.tx_utils import create_tx
 
 
@@ -24,7 +25,7 @@ def training_step(
     state: train_state.TrainState,
     drp_rng: jnp.DeviceArray,
     batch: Dict[str, jnp.DeviceArray],
-):
+) -> TrainingStepOutput:
     new_drp_rng, drp_rng = jax.random.split(drp_rng, num=2)
 
     def loss_fn(params):
@@ -57,10 +58,14 @@ def training_step(
 
     new_state = state.apply_gradients(grads=grads)
 
-    return new_state, new_drp_rng, loss
+    return TrainingStepOutput(
+        state=new_state,
+        dropout_rng=new_drp_rng,
+        loss=loss,
+    )
 
 
-def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]):
+def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]) -> ValidationStepOutput:
     labels = batch.pop("labels")
     label_paddings = batch.pop("label_paddings")
 
@@ -75,7 +80,7 @@ def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceAr
     loss = state.loss_fn(outputs.logits, logit_paddings, labels, label_paddings).mean()
     loss = jax.lax.pmean(loss, axis_name="batch")
 
-    return loss
+    return ValidationStepOutput(loss=loss)
 
 
 @dataclasses.dataclass
