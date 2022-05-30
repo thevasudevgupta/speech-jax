@@ -1,6 +1,6 @@
 import dataclasses
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import flax
 import jax
@@ -15,6 +15,15 @@ from speech_jax import training
 from speech_jax.training import TrainingStepOutput, ValidationStepOutput
 from speech_jax.tx_utils import create_tx
 
+from transformers.models.wav2vec2.modeling_flax_wav2vec2 import _compute_mask_indices
+
+# masked_indices = _compute_mask_indices((2, 32), 0.05, 10)
+# print(masked_indices)
+# exit()
+
+# TODO:
+# hf-flax spec augmentation is not that great
+# let's implement by ourselves
 
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
@@ -84,11 +93,20 @@ def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceAr
 
 
 @dataclasses.dataclass
+class SpecAugmentConfig:
+    shape: Tuple[int, int]
+    mask_time_prob: float = 0.05
+    mask_time_span: int = 10
+    min_masks: int = 0
+
+@dataclasses.dataclass
 class DataCollator:
     feature_extractor: Wav2Vec2FeatureExtractor
     tokenizer: Wav2Vec2CTCTokenizer
     audio_maxlen: Optional[int] = None
     text_maxlen: Optional[int] = None
+    spec_augment_config: Optional[SpecAugmentConfig] = None
+    get_feat_extract_output_lengths: Callable = None
 
     def __call__(self, batch: List[Dict[str, Any]]):
         audio = [sample["audio"]["array"] for sample in batch]
@@ -113,22 +131,44 @@ class DataCollator:
         labels = targets["input_ids"]
         label_paddings = (targets["attention_mask"] == 0).astype(np.int32)
 
-        return {
+        outputs = {
             "input_values": audio["input_values"],
             "attention_mask": audio["attention_mask"],
             "labels": labels,
             "label_paddings": label_paddings,
         }
 
+        if self.spec_augment_config is not None:
+            # batch_size, audio_seqlen
+            input_lengths = np.sum(audio["attention_mask"], axis=1)
+            # -> batch_size
+            assert self.get_feat_extract_output_lengths is not None
+            input_lengths = self.get_feat_extract_output_lengths(input_lengths)
+            # -> batch_size
+            seqlen = self.get_feat_extract_output_lengths(self.audio_maxlen)
+            attention_mask = input_lengths[:, None] > np.arange(seqlen)
+            # print(input_lengths)
+            # print(attention_mask)
+
+            outputs["mask_time_indices"] = _compute_mask_indices(
+                self.spec_augment_config.shape,
+                self.spec_augment_config.mask_time_prob,
+                self.spec_augment_config.mask_time_span,
+                attention_mask=attention_mask,
+                min_masks=self.spec_augment_config.min_masks,
+            )
+
+        #     print(outputs["mask_time_indices"])
+
+        # exit()
+
+        return outputs
+
 
 @dataclasses.dataclass
 class TrainerConfig(training.TrainerConfig):
     lr: float
     weight_decay: float
-
-
-# TODO (for fine-tuning):
-# work on mask_time_indices
 
 print(jax.devices())
 
@@ -140,17 +180,44 @@ trainer_config = TrainerConfig(
     lr=5e-5,
     weight_decay=1e-4,
     train_batch_size_per_device=1,
-    eval_batch_size_per_device=1,
+    eval_batch_size_per_device=1, # TODO this is not supported
     wandb_project_name="speech-JAX",
     epochs_save_dir="epochs-960h",
-    logging_steps=1,
+    logging_steps=8,
 )
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
 tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
-collate_fn = DataCollator(
-    feature_extractor, tokenizer, audio_maxlen=246000, text_maxlen=256
+
+audio_maxlen, text_maxlen = 246000, 256
+train_batch_size = trainer_config.train_batch_size_per_device * jax.device_count()
+spec_augment_config = SpecAugmentConfig(
+    (train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen)),
+    mask_time_prob=0.05,
+    mask_time_span=7,
+    min_masks=15,
 )
+print(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen))
+
+collate_fn = DataCollator(
+    feature_extractor, tokenizer, audio_maxlen=audio_maxlen, text_maxlen=text_maxlen,
+    spec_augment_config=spec_augment_config,
+    get_feat_extract_output_lengths=model._get_feat_extract_output_lengths,
+)
+
+def hf_save_fn(save_dir, params, model_save_fn, feature_extractor_save_fn, tokenizer_save_fn, push_to_hub=False):
+    model_save_fn(save_dir, params=params, push_to_hub=push_to_hub)
+    feature_extractor_save_fn(save_dir, push_to_hub=push_to_hub)
+    tokenizer_save_fn(save_dir, push_to_hub=push_to_hub)
+
+save_fn = partial(
+    hf_save_fn,
+    model_save_fn=model.save_pretrained,
+    feature_extractor_save_fn=feature_extractor.save_pretrained,
+    tokenizer_save_fn=tokenizer.save_pretrained,
+    push_to_hub=False,
+)
+
 
 trainer = training.Trainer(
     config=trainer_config,
@@ -158,6 +225,7 @@ trainer = training.Trainer(
     validation_step=validation_step,
     pmap_kwargs={"axis_name": "batch", "donate_argnums": (0, 1)},
     collate_fn=collate_fn,
+    model_save_fn=save_fn,
 )
 
 
@@ -165,12 +233,11 @@ from datasets import interleave_datasets, load_dataset
 
 train_data = [
     load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
-    load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
-    load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
+    # load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
+    # load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
 ]
 train_data = interleave_datasets(train_data)
 val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
-
 
 state = TrainState.create(
     apply_fn=model.__call__,
@@ -181,11 +248,6 @@ state = TrainState.create(
 )
 
 try:
-    state = trainer.train(state, train_data, val_data)
+    new_state = trainer.train(state, train_data, val_data)
 except KeyboardInterrupt:
     print("Interrupting training through KEYBOARD!!")
-
-model_id = "jax-wav2vec2-100h"
-model.save_pretrained(model_id, params=state.params, push_to_hub=True)
-feature_extractor.save_pretrained(model_id, push_to_hub=True)
-tokenizer.save_pretrained(model_id, push_to_hub=True)

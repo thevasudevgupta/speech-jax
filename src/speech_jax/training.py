@@ -58,7 +58,7 @@ class Trainer:
     validation_step: Callable
     pmap_kwargs: dataclasses.field(default_factory=dict)
     collate_fn: Optional[Callable] = None
-    model_save_fn: Optional[Callable] = None
+    model_save_fn: Optional[Callable] = None # input signature has `save_dir` & `params`
 
     def train(
         self,
@@ -145,7 +145,7 @@ class Trainer:
         # yaml.dump(training_state, TRAINING_STATE_PATH)
 
         if self.model_save_fn is not None:
-            self.model_save_fn(ckpt_dir, params=state.params)
+            self.model_save_fn(ckpt_dir, state.params)
         else:
             with open(ckpt_dir / MODEL_PATH, "wb") as f:
                 f.write(to_bytes(state.params))

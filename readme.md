@@ -1,4 +1,4 @@
-Something exciting WIP
+***This project is work in progress and I don't recommend you to use this project now. Something stable would be released soon and then you would be able to use this project for your tasks.***
 
 ### For development locally
 
