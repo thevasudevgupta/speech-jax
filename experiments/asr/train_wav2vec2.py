@@ -80,6 +80,7 @@ def validation_step(
 ) -> ValidationStepOutput:
     labels = batch.pop("labels")
     label_paddings = batch.pop("label_paddings")
+    batch.pop("mask_time_indices", None)
 
     input_lengths = jnp.sum(batch["attention_mask"], axis=1)
     input_lengths = state.get_feat_extract_output_lengths(input_lengths)
@@ -187,8 +188,8 @@ trainer_config = TrainerConfig(
     train_batch_size_per_device=1,
     eval_batch_size_per_device=1,  # TODO this is not supported
     wandb_project_name="speech-JAX",
-    epochs_save_dir="epochs-960h",
-    logging_steps=8,
+    epochs_save_dir="epochs-100h-spec-augment",
+    logging_steps=32,
 )
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)

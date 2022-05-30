@@ -42,7 +42,7 @@ class TrainerConfig:
     train_batch_size_per_device: int
     eval_batch_size_per_device: int
     wandb_project_name: str
-    epochs_save_dir: str
+    epochs_save_dir: Optional[str]
     logging_steps: int
 
     def to_dict(self):
@@ -68,6 +68,7 @@ class Trainer:
         seed: int = 0,
     ):
         logger = wandb.init(project=self.config.wandb_project_name)
+        # jax.start_trace("./tensorboard")
 
         train_batch_size = self.config.train_batch_size_per_device * jax.device_count()
         eval_batch_size = self.config.eval_batch_size_per_device * jax.device_count()
@@ -87,9 +88,6 @@ class Trainer:
 
         rng = jax.random.PRNGKey(seed)
         dropout_rng = jax.random.split(rng, jax.device_count())
-
-        epochs_save_dir = Path(self.config.epochs_save_dir)
-        epochs_save_dir.mkdir(exist_ok=True)
 
         for epoch in range(self.config.max_epochs):
             tr_loss, avg_tr_loss = jnp.array(0), jnp.array(0)
@@ -113,9 +111,10 @@ class Trainer:
                     )
                     tr_loss = jnp.array(0)
 
-            self.save_checkpoint(
-                jax_utils.unreplicate(state), epochs_save_dir / f"epoch-{epoch}"
-            )
+            if self.epochs_save_dir is not None:
+                self.save_checkpoint(
+                    jax_utils.unreplicate(state), Path(epochs_save_dir, f"epoch-{epoch}")
+                )
 
             val_steps, val_loss = 0, jnp.array(0)
             for batch in tqdm(val_data):
@@ -124,6 +123,8 @@ class Trainer:
                 val_loss += jax_utils.unreplicate(outputs.loss)
                 val_steps += 1
             logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})
+
+        # jax.stop_trace()
 
         return jax_utils.unreplicate(state)
 
