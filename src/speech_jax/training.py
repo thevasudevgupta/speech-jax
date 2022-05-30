@@ -31,17 +31,6 @@ class TrainingStepOutput:
     loss: jnp.DeviceArray
 
 @struct.dataclass
-class TrainingStepInput:
-    state: train_state.TrainState
-    dropout_rng: jnp.DeviceArray
-    batch: Dict[str, jnp.DeviceArray]
-
-@struct.dataclass
-class ValidationStepInput:
-    state: train_state.TrainState
-    batch: Dict[str, jnp.DeviceArray]
-    
-@struct.dataclass
 class ValidationStepOutput:
     loss: jnp.DeviceArray
 
@@ -100,8 +89,7 @@ class Trainer(BaseModel):
             for step, batch in tqdm(enumerate(train_data)):
                 batch = shard(batch)
 
-                inputs = TrainingStepInput(state=state, dropout_rng=dropout_rng, batch=batch)
-                outputs = training_step(inputs)
+                outputs = training_step(state, dropout_rng, batch)
                 state, dropout_rng = outputs.state, outputs.dropout_rng
                 loss = jax_utils.unreplicate(outputs.loss)
 
@@ -125,8 +113,7 @@ class Trainer(BaseModel):
             val_steps, val_loss = 0, jnp.array(0)
             for batch in tqdm(val_data):
                 batch = shard(batch)
-                inputs = ValidationStepInput(state=state, batch=batch)
-                outputs = validation_step(inputs)
+                outputs = validation_step(state, batch)
                 val_loss += jax_utils.unreplicate(outputs.loss)
                 val_steps += 1
             logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})

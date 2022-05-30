@@ -15,7 +15,7 @@ from transformers.models.wav2vec2.modeling_flax_wav2vec2 import \
     _compute_mask_indices
 
 from speech_jax import training
-from speech_jax.training import TrainingStepOutput, ValidationStepOutput, ValidationStepInput, TrainingStepInput
+from speech_jax.training import TrainingStepOutput, ValidationStepOutput
 from speech_jax.tx_utils import create_tx
 
 # TODO:
@@ -28,9 +28,8 @@ class TrainState(train_state.TrainState):
     get_feat_extract_output_lengths: Callable = flax.struct.field(pytree_node=False)
 
 
-def training_step(inputs: TrainingStepInput) -> TrainingStepOutput:
-    new_drp_rng, drp_rng = jax.random.split(inputs.dropout_rng, num=2)
-    state, batch = inputs.state, inputs.batch
+def training_step(state: train_state.TrainState, dropout_rng: jnp.DeviceArray, batch: Dict[str, jnp.DeviceArray]) -> TrainingStepOutput:
+    new_drp_rng, drp_rng = jax.random.split(dropout_rng, num=2)
 
     def loss_fn(params):
         labels = batch.pop("labels")
@@ -69,8 +68,7 @@ def training_step(inputs: TrainingStepInput) -> TrainingStepOutput:
     )
 
 
-def validation_step(inputs: ValidationStepInput) -> ValidationStepOutput:
-    state, batch = inputs.state, inputs.batch
+def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]) -> ValidationStepOutput:
 
     labels = batch.pop("labels")
     label_paddings = batch.pop("label_paddings")
@@ -165,12 +163,12 @@ model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 
 trainer_config = TrainerConfig(
     max_epochs=30,
-    lr=5e-5,
+    lr=2e-5,
     weight_decay=1e-2,
     train_batch_size_per_device=1,
     eval_batch_size_per_device=1,  # TODO this is not supported
     wandb_project_name="speech-JAX",
-    epochs_save_dir="epochs-100h-spec-augment-increased",
+    epochs_save_dir="epochs-100h-spec-augment-increased-wd-lr-half",
     logging_steps=64,
 )
 
@@ -223,7 +221,7 @@ trainer = training.Trainer(
     config=trainer_config,
     training_step=training_step,
     validation_step=validation_step,
-    pmap_kwargs={"axis_name": "batch", "donate_argnums": (0, 1)},
+    pmap_kwargs={"axis_name": "batch", "donate_argnums": (0,)},
     collate_fn=collate_fn,
     model_save_fn=save_fn,
 )
