@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import dataclasses
 
 import flax
 import jax
@@ -14,12 +15,8 @@ from transformers.models.wav2vec2.modeling_flax_wav2vec2 import \
     _compute_mask_indices
 
 from speech_jax import training
-from speech_jax.training import TrainingStepOutput, ValidationStepOutput
+from speech_jax.training import TrainingStepOutput, ValidationStepOutput, ValidationStepInput, TrainingStepInput
 from speech_jax.tx_utils import create_tx
-
-# masked_indices = _compute_mask_indices((2, 32), 0.05, 10)
-# print(masked_indices)
-# exit()
 
 # TODO:
 # hf-flax spec augmentation is not that great
@@ -31,12 +28,9 @@ class TrainState(train_state.TrainState):
     get_feat_extract_output_lengths: Callable = flax.struct.field(pytree_node=False)
 
 
-def training_step(
-    state: train_state.TrainState,
-    drp_rng: jnp.DeviceArray,
-    batch: Dict[str, jnp.DeviceArray],
-) -> TrainingStepOutput:
-    new_drp_rng, drp_rng = jax.random.split(drp_rng, num=2)
+def training_step(inputs: TrainingStepInput) -> TrainingStepOutput:
+    new_drp_rng, drp_rng = jax.random.split(inputs.dropout_rng, num=2)
+    state, batch = inputs.state, inputs.batch
 
     def loss_fn(params):
         labels = batch.pop("labels")
@@ -75,9 +69,9 @@ def training_step(
     )
 
 
-def validation_step(
-    state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]
-) -> ValidationStepOutput:
+def validation_step(inputs: ValidationStepInput) -> ValidationStepOutput:
+    state, batch = inputs.state, inputs.batch
+
     labels = batch.pop("labels")
     label_paddings = batch.pop("label_paddings")
     batch.pop("mask_time_indices", None)
@@ -102,8 +96,8 @@ class SpecAugmentConfig(BaseModel):
     mask_time_span: int = 10
     min_masks: int = 0
 
-
-class DataCollator(BaseModel):
+@dataclasses.dataclass
+class DataCollator:
     feature_extractor: Wav2Vec2FeatureExtractor
     tokenizer: Wav2Vec2CTCTokenizer
     audio_maxlen: Optional[int] = None
@@ -142,16 +136,11 @@ class DataCollator(BaseModel):
         }
 
         if self.spec_augment_config is not None:
-            # batch_size, audio_seqlen
             input_lengths = np.sum(audio["attention_mask"], axis=1)
-            # -> batch_size
             assert self.get_feat_extract_output_lengths is not None
             input_lengths = self.get_feat_extract_output_lengths(input_lengths)
-            # -> batch_size
             seqlen = self.get_feat_extract_output_lengths(self.audio_maxlen)
             attention_mask = input_lengths[:, None] > np.arange(seqlen)
-            # print(input_lengths)
-            # print(attention_mask)
 
             outputs["mask_time_indices"] = _compute_mask_indices(
                 self.spec_augment_config.shape,
@@ -160,10 +149,6 @@ class DataCollator(BaseModel):
                 attention_mask=attention_mask,
                 min_masks=self.spec_augment_config.min_masks,
             )
-
-        #     print(outputs["mask_time_indices"])
-
-        # exit()
 
         return outputs
 
@@ -181,12 +166,12 @@ model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 trainer_config = TrainerConfig(
     max_epochs=30,
     lr=5e-5,
-    weight_decay=1e-4,
+    weight_decay=1e-2,
     train_batch_size_per_device=1,
     eval_batch_size_per_device=1,  # TODO this is not supported
     wandb_project_name="speech-JAX",
-    epochs_save_dir="epochs-100h-spec-augment",
-    logging_steps=32,
+    epochs_save_dir="epochs-100h-spec-augment-increased",
+    logging_steps=64,
 )
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
@@ -195,10 +180,10 @@ tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
 audio_maxlen, text_maxlen = 246000, 256
 train_batch_size = trainer_config.train_batch_size_per_device * jax.device_count()
 spec_augment_config = SpecAugmentConfig(
-    (train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen)),
+    shape=(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen)),
     mask_time_prob=0.05,
-    mask_time_span=7,
-    min_masks=15,
+    mask_time_span=10,
+    min_masks=20,
 )
 print(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen))
 

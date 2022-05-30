@@ -30,7 +30,17 @@ class TrainingStepOutput:
     dropout_rng: jnp.DeviceArray
     loss: jnp.DeviceArray
 
+@struct.dataclass
+class TrainingStepInput:
+    state: train_state.TrainState
+    dropout_rng: jnp.DeviceArray
+    batch: Dict[str, jnp.DeviceArray]
 
+@struct.dataclass
+class ValidationStepInput:
+    state: train_state.TrainState
+    batch: Dict[str, jnp.DeviceArray]
+    
 @struct.dataclass
 class ValidationStepOutput:
     loss: jnp.DeviceArray
@@ -41,7 +51,7 @@ class TrainerConfig(BaseModel):
     train_batch_size_per_device: int
     eval_batch_size_per_device: int
     wandb_project_name: str
-    epochs_save_dir: Optional[str]
+    epochs_save_dir: Optional[str] = None
     logging_steps: int
 
 
@@ -53,7 +63,7 @@ class Trainer(BaseModel):
     collate_fn: Optional[Callable] = None
 
     # input signature has `save_dir` & `params`
-    model_save_fn: Optional[Callable] = None  
+    model_save_fn: Optional[Callable] = None
 
     def train(
         self,
@@ -90,7 +100,8 @@ class Trainer(BaseModel):
             for step, batch in tqdm(enumerate(train_data)):
                 batch = shard(batch)
 
-                outputs = training_step(state, dropout_rng, batch)
+                inputs = TrainingStepInput(state=state, dropout_rng=dropout_rng, batch=batch)
+                outputs = training_step(inputs)
                 state, dropout_rng = outputs.state, outputs.dropout_rng
                 loss = jax_utils.unreplicate(outputs.loss)
 
@@ -106,15 +117,16 @@ class Trainer(BaseModel):
                     )
                     tr_loss = jnp.array(0)
 
-            if self.epochs_save_dir is not None:
+            if self.config.epochs_save_dir is not None:
                 self.save_checkpoint(
-                    jax_utils.unreplicate(state), Path(epochs_save_dir, f"epoch-{epoch}")
+                    jax_utils.unreplicate(state), Path(self.config.epochs_save_dir, f"epoch-{epoch}")
                 )
 
             val_steps, val_loss = 0, jnp.array(0)
             for batch in tqdm(val_data):
                 batch = shard(batch)
-                outputs = validation_step(state, batch)
+                inputs = ValidationStepInput(state=state, batch=batch)
+                outputs = validation_step(inputs)
                 val_loss += jax_utils.unreplicate(outputs.loss)
                 val_steps += 1
             logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})
@@ -141,7 +153,8 @@ class Trainer(BaseModel):
         #     "config": self.config.dict(),
         #     "extra": extra,
         # }
-        # yaml.dump(training_state, TRAINING_STATE_PATH)
+        # with open(ckpt_dir / TRAINING_STATE_PATH, "w") as f:
+        #     yaml.dump(training_state, f)
 
         if self.model_save_fn is not None:
             self.model_save_fn(ckpt_dir, state.params)
