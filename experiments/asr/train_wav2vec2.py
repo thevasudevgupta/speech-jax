@@ -10,12 +10,12 @@ import optax
 from flax.training import train_state
 from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
                           Wav2Vec2FeatureExtractor)
+from transformers.models.wav2vec2.modeling_flax_wav2vec2 import \
+    _compute_mask_indices
 
 from speech_jax import training
 from speech_jax.training import TrainingStepOutput, ValidationStepOutput
 from speech_jax.tx_utils import create_tx
-
-from transformers.models.wav2vec2.modeling_flax_wav2vec2 import _compute_mask_indices
 
 # masked_indices = _compute_mask_indices((2, 32), 0.05, 10)
 # print(masked_indices)
@@ -24,6 +24,7 @@ from transformers.models.wav2vec2.modeling_flax_wav2vec2 import _compute_mask_in
 # TODO:
 # hf-flax spec augmentation is not that great
 # let's implement by ourselves
+
 
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
@@ -74,13 +75,15 @@ def training_step(
     )
 
 
-def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]) -> ValidationStepOutput:
+def validation_step(
+    state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]
+) -> ValidationStepOutput:
     labels = batch.pop("labels")
     label_paddings = batch.pop("label_paddings")
 
     input_lengths = jnp.sum(batch["attention_mask"], axis=1)
     input_lengths = state.get_feat_extract_output_lengths(input_lengths)
-    
+
     outputs = state.apply_fn(**batch, params=state.params, train=False)
 
     seqlen = outputs.logits.shape[1]
@@ -98,6 +101,7 @@ class SpecAugmentConfig:
     mask_time_prob: float = 0.05
     mask_time_span: int = 10
     min_masks: int = 0
+
 
 @dataclasses.dataclass
 class DataCollator:
@@ -170,6 +174,7 @@ class TrainerConfig(training.TrainerConfig):
     lr: float
     weight_decay: float
 
+
 print(jax.devices())
 
 model_id = "facebook/wav2vec2-large-lv60"
@@ -180,7 +185,7 @@ trainer_config = TrainerConfig(
     lr=5e-5,
     weight_decay=1e-4,
     train_batch_size_per_device=1,
-    eval_batch_size_per_device=1, # TODO this is not supported
+    eval_batch_size_per_device=1,  # TODO this is not supported
     wandb_project_name="speech-JAX",
     epochs_save_dir="epochs-960h",
     logging_steps=8,
@@ -200,15 +205,27 @@ spec_augment_config = SpecAugmentConfig(
 print(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen))
 
 collate_fn = DataCollator(
-    feature_extractor, tokenizer, audio_maxlen=audio_maxlen, text_maxlen=text_maxlen,
+    feature_extractor,
+    tokenizer,
+    audio_maxlen=audio_maxlen,
+    text_maxlen=text_maxlen,
     spec_augment_config=spec_augment_config,
     get_feat_extract_output_lengths=model._get_feat_extract_output_lengths,
 )
 
-def hf_save_fn(save_dir, params, model_save_fn, feature_extractor_save_fn, tokenizer_save_fn, push_to_hub=False):
+
+def hf_save_fn(
+    save_dir,
+    params,
+    model_save_fn,
+    feature_extractor_save_fn,
+    tokenizer_save_fn,
+    push_to_hub=False,
+):
     model_save_fn(save_dir, params=params, push_to_hub=push_to_hub)
     feature_extractor_save_fn(save_dir, push_to_hub=push_to_hub)
     tokenizer_save_fn(save_dir, push_to_hub=push_to_hub)
+
 
 save_fn = partial(
     hf_save_fn,

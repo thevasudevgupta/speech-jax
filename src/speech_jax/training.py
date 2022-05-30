@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, Optional, Union
 
 import jax
 import jax.numpy as jnp
+import wandb
 import yaml
 from datasets import IterableDataset
 from flax import jax_utils, struct
@@ -12,12 +13,9 @@ from flax.training import train_state
 from flax.training.common_utils import shard
 from tqdm.auto import tqdm
 
-import wandb
-
 from .data_utils import HFIterableDataLoader
 
 # from huggingface_hub import Repository
-
 
 
 PathType = Union[Path, str]
@@ -58,7 +56,9 @@ class Trainer:
     validation_step: Callable
     pmap_kwargs: dataclasses.field(default_factory=dict)
     collate_fn: Optional[Callable] = None
-    model_save_fn: Optional[Callable] = None # input signature has `save_dir` & `params`
+    model_save_fn: Optional[
+        Callable
+    ] = None  # input signature has `save_dir` & `params`
 
     def train(
         self,
@@ -128,7 +128,10 @@ class Trainer:
         return jax_utils.unreplicate(state)
 
     def save_checkpoint(
-        self, state: train_state.TrainState, ckpt_dir: PathType, extra: Optional[Dict[str, Any]] = None
+        self,
+        state: train_state.TrainState,
+        ckpt_dir: PathType,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> Path:
         # state must be unreplicated before passing it
 
@@ -156,4 +159,3 @@ class Trainer:
 
     def load_checkpoint(self, ckpt_dir: PathType):
         ...
-    
