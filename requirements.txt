@@ -1,4 +1,5 @@
 # jax[cpu]
+pydantic
 flax
 optax
 wandb

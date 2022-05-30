@@ -1,4 +1,4 @@
-import dataclasses
+from pydantic import BaseModel
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -96,16 +96,14 @@ def validation_step(
     return ValidationStepOutput(loss=loss)
 
 
-@dataclasses.dataclass
-class SpecAugmentConfig:
+class SpecAugmentConfig(BaseModel):
     shape: Tuple[int, int]
     mask_time_prob: float = 0.05
     mask_time_span: int = 10
     min_masks: int = 0
 
 
-@dataclasses.dataclass
-class DataCollator:
+class DataCollator(BaseModel):
     feature_extractor: Wav2Vec2FeatureExtractor
     tokenizer: Wav2Vec2CTCTokenizer
     audio_maxlen: Optional[int] = None
@@ -170,7 +168,6 @@ class DataCollator:
         return outputs
 
 
-@dataclasses.dataclass
 class TrainerConfig(training.TrainerConfig):
     lr: float
     weight_decay: float

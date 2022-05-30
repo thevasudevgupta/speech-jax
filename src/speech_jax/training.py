@@ -1,4 +1,4 @@
-import dataclasses
+from pydantic import BaseModel, Field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -36,8 +36,7 @@ class ValidationStepOutput:
     loss: jnp.DeviceArray
 
 
-@dataclasses.dataclass
-class TrainerConfig:
+class TrainerConfig(BaseModel):
     max_epochs: int
     train_batch_size_per_device: int
     eval_batch_size_per_device: int
@@ -45,20 +44,16 @@ class TrainerConfig:
     epochs_save_dir: Optional[str]
     logging_steps: int
 
-    def to_dict(self):
-        return dataclasses.asdict(self)
 
-
-@dataclasses.dataclass
-class Trainer:
+class Trainer(BaseModel):
     config: TrainerConfig
     training_step: Callable
     validation_step: Callable
-    pmap_kwargs: dataclasses.field(default_factory=dict)
+    pmap_kwargs: Dict[str, Any] = {}
     collate_fn: Optional[Callable] = None
-    model_save_fn: Optional[
-        Callable
-    ] = None  # input signature has `save_dir` & `params`
+
+    # input signature has `save_dir` & `params`
+    model_save_fn: Optional[Callable] = None  
 
     def train(
         self,
@@ -143,7 +138,7 @@ class Trainer:
         # with repo.commit("speech_jax 🔥"):
 
         # training_state = {
-        #     "config": self.config.to_dict(),
+        #     "config": self.config.dict(),
         #     "extra": extra,
         # }
         # yaml.dump(training_state, TRAINING_STATE_PATH)
