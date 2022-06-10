@@ -162,24 +162,24 @@ model_id = "facebook/wav2vec2-large-lv60"
 model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 
 trainer_config = TrainerConfig(
-    max_epochs=30,
-    lr=2e-5,
-    weight_decay=1e-2,
+    max_epochs=20,
+    lr=1e-5,
+    weight_decay=1e-3,
     train_batch_size_per_device=1,
     eval_batch_size_per_device=1,  # TODO this is not supported
     wandb_project_name="speech-JAX",
-    epochs_save_dir="epochs-100h-spec-augment-increased-wd-lr-half",
+    epochs_save_dir="epochs-100h-better-scheduler_last",
     logging_steps=64,
 )
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
 tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
 
-audio_maxlen, text_maxlen = 246000, 256
+audio_maxlen, text_maxlen = 384000, 384
 train_batch_size = trainer_config.train_batch_size_per_device * jax.device_count()
 spec_augment_config = SpecAugmentConfig(
     shape=(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen)),
-    mask_time_prob=0.05,
+    mask_time_prob=0.1,
     mask_time_span=10,
     min_masks=20,
 )
@@ -216,6 +216,22 @@ save_fn = partial(
     push_to_hub=False,
 )
 
+import optax
+def scheduler_fn(lr, init_lr, warmup_steps, num_train_steps):
+    decay_steps = num_train_steps - warmup_steps
+    warmup_fn = optax.linear_schedule(
+        init_value=init_lr, end_value=lr, transition_steps=warmup_steps
+    )
+    decay_fn = optax.linear_schedule(
+        init_value=lr, end_value=1e-7, transition_steps=decay_steps
+    )
+    lr = optax.join_schedules(
+        schedules=[warmup_fn, decay_fn], boundaries=[warmup_steps]
+    )
+    return lr
+
+lr_scheduler = scheduler_fn(trainer_config.lr, 0.0, 3567*2, 3567*20)
+
 
 trainer = training.Trainer(
     config=trainer_config,
@@ -224,8 +240,8 @@ trainer = training.Trainer(
     pmap_kwargs={"axis_name": "batch", "donate_argnums": (0,)},
     collate_fn=collate_fn,
     model_save_fn=save_fn,
+    lr_scheduler=lr_scheduler,
 )
-
 
 from datasets import interleave_datasets, load_dataset
 
@@ -240,7 +256,7 @@ val_data = load_dataset("librispeech_asr", "clean", split="validation", streamin
 state = TrainState.create(
     apply_fn=model.__call__,
     params=model.params,
-    tx=create_tx(trainer_config.lr, trainer_config.weight_decay),
+    tx=create_tx(lr_scheduler, trainer_config.weight_decay),
     loss_fn=partial(optax.ctc_loss, blank_id=tokenizer.pad_token_id),
     get_feat_extract_output_lengths=model._get_feat_extract_output_lengths,
 )

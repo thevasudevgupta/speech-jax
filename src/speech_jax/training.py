@@ -50,6 +50,7 @@ class Trainer(BaseModel):
     validation_step: Callable
     pmap_kwargs: Dict[str, Any] = {}
     collate_fn: Optional[Callable] = None
+    lr_scheduler: Callable = None
 
     # input signature has `save_dir` & `params`
     model_save_fn: Optional[Callable] = None
@@ -91,6 +92,9 @@ class Trainer(BaseModel):
             for step, batch in pbar:
                 batch = shard(batch)
 
+                # TODO: logging old step lr
+                lr = self.lr_scheduler(jax_utils.unreplicate(state.step))
+                
                 outputs = training_step(state, dropout_rng, batch)
                 state, dropout_rng = outputs.state, outputs.dropout_rng
                 loss = jax_utils.unreplicate(outputs.loss)
@@ -102,6 +106,7 @@ class Trainer(BaseModel):
                     logs = {
                             "tr_loss": tr_loss.item() / self.config.logging_steps,
                             "avg_tr_loss": avg_tr_loss.item() / (step + 1),
+                            "lr": lr.item(),
                         }
                     pbar.set_postfix(**logs)
                     logger.log(logs)
