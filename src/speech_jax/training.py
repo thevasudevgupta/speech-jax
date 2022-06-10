@@ -61,7 +61,7 @@ class Trainer(BaseModel):
         val_data: IterableDataset,
         seed: int = 0,
     ):
-        logger = wandb.init(project=self.config.wandb_project_name)
+        logger = wandb.init(project=self.config.wandb_project_name, config=self.config.dict())
         # jax.start_trace("./tensorboard")
 
         train_batch_size = self.config.train_batch_size_per_device * jax.device_count()
@@ -86,7 +86,9 @@ class Trainer(BaseModel):
         for epoch in range(self.config.max_epochs):
             tr_loss, avg_tr_loss = jnp.array(0), jnp.array(0)
             train_data.set_epoch(epoch)
-            for step, batch in tqdm(enumerate(train_data)):
+
+            pbar = tqdm(enumerate(train_data), desc=f"Running epoch-{epoch}")
+            for step, batch in pbar:
                 batch = shard(batch)
 
                 outputs = training_step(state, dropout_rng, batch)
@@ -97,12 +99,12 @@ class Trainer(BaseModel):
                 avg_tr_loss += loss
 
                 if (step + 1) % self.config.logging_steps == 0:
-                    logger.log(
-                        {
+                    logs = {
                             "tr_loss": tr_loss.item() / self.config.logging_steps,
                             "avg_tr_loss": avg_tr_loss.item() / (step + 1),
                         }
-                    )
+                    pbar.set_postfix(**logs)
+                    logger.log(logs)
                     tr_loss = jnp.array(0)
 
             if self.config.epochs_save_dir is not None:
