@@ -213,9 +213,12 @@ save_fn = partial(
 )
 
 import optax
+
 from speech_jax.tx_utils import linear_scheduler_with_warmup
 
-lr_scheduler = linear_scheduler_with_warmup(trainer_config.lr, 0.0, 4000 * 2, 15000 * 20)
+lr_scheduler = linear_scheduler_with_warmup(
+    trainer_config.lr, 0.0, 4000 * 2, 15000 * 20
+)
 
 trainer = training.Trainer(
     config=trainer_config,

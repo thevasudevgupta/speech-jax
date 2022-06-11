@@ -1,6 +1,7 @@
 import optax
 from flax import traverse_util
 
+
 def linear_scheduler_with_warmup(lr, init_lr, warmup_steps, num_train_steps):
     decay_steps = num_train_steps - warmup_steps
     warmup_fn = optax.linear_schedule(
@@ -13,6 +14,7 @@ def linear_scheduler_with_warmup(lr, init_lr, warmup_steps, num_train_steps):
         schedules=[warmup_fn, decay_fn], boundaries=[warmup_steps]
     )
     return lr
+
 
 def create_tx(lr, weight_decay):
     def weight_decay_mask(params):

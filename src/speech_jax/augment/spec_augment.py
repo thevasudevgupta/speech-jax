@@ -1,7 +1,7 @@
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
 from pydantic import BaseModel
 
 
@@ -11,7 +11,10 @@ class SpecAugment(BaseModel):
     min_masks: int
 
     def compute_mask_indices(
-        self, shape: Tuple[int, int], rng: jax.DeviceArray, attention_mask: Optional[jnp.DeviceArray] = None
+        self,
+        shape: Tuple[int, int],
+        rng: jax.DeviceArray,
+        attention_mask: Optional[jnp.DeviceArray] = None,
     ):
         spec_augment_mask = jnp.zeros(shape, dtype=jnp.bool)
         bsz, seqlen = shape
@@ -39,13 +42,6 @@ class SpecAugment(BaseModel):
 spec_aug = SpecAugment(0.1, 4, 1)
 rng = jax.random.PRNGKey(0)
 spec_aug.compute_mask_indices((2, 10), rng)
-
-
-
-
-
-
-
 
 
 def _compute_mask_indices(
@@ -83,7 +79,9 @@ def _compute_mask_indices(
         )
 
     # compute number of masked spans in batch
-    num_masked_spans = int(mask_prob * sequence_length / mask_length + np.random.rand(1).item())
+    num_masked_spans = int(
+        mask_prob * sequence_length / mask_length + np.random.rand(1).item()
+    )
     num_masked_spans = max(num_masked_spans, min_masks)
 
     # make sure num masked indices <= sequence_length
@@ -96,19 +94,27 @@ def _compute_mask_indices(
     # get random indices to mask
     spec_aug_mask_idxs = np.array(
         [
-            np.random.choice(np.arange(sequence_length - (mask_length - 1)), num_masked_spans, replace=False)
+            np.random.choice(
+                np.arange(sequence_length - (mask_length - 1)),
+                num_masked_spans,
+                replace=False,
+            )
             for _ in range(batch_size)
         ]
     )
 
     # expand masked indices to masked spans
-    spec_aug_mask_idxs = np.broadcast_to(spec_aug_mask_idxs[:, :, None], (batch_size, num_masked_spans, mask_length))
-    spec_aug_mask_idxs = spec_aug_mask_idxs.reshape(batch_size, num_masked_spans * mask_length)
-
-    offsets = np.arange(mask_length)[None, None, :]
-    offsets = np.broadcast_to(offsets, (batch_size, num_masked_spans, mask_length)).reshape(
+    spec_aug_mask_idxs = np.broadcast_to(
+        spec_aug_mask_idxs[:, :, None], (batch_size, num_masked_spans, mask_length)
+    )
+    spec_aug_mask_idxs = spec_aug_mask_idxs.reshape(
         batch_size, num_masked_spans * mask_length
     )
+
+    offsets = np.arange(mask_length)[None, None, :]
+    offsets = np.broadcast_to(
+        offsets, (batch_size, num_masked_spans, mask_length)
+    ).reshape(batch_size, num_masked_spans * mask_length)
     spec_aug_mask_idxs = spec_aug_mask_idxs + offsets
 
     # scatter indices to mask
