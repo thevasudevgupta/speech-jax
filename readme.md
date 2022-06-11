@@ -11,10 +11,10 @@
 
 ```bash
 # following command will finetune Wav2Vec2-large model on Librispeech-960h dataset
-python3 experiments/finetune_wav2vec2.py
+python3 projects/finetune_wav2vec2.py
 
 # following command will pre-train Wav2Vec2-base model on Librispeech-960h dataset
-python3 experiments/pretrain_wav2vec2.py
+python3 projects/pretrain_wav2vec2.py
 
 # final model is saved in the huggingface format 
 # => you can load it directly using `FlaxAutoModel.from_pretrained`
@@ -40,13 +40,14 @@ pytest -sv tests/
 
 ```python
 from speech_jax import training
-from flax.tx_utils import create_tx
+from flax.tx_utils import create_tx, linear_scheduler_with_warmup
 from flax.training import train_state
 
 config = training.TrainerConfig(...)
 trainer = training.Trainer(config, ...)
 
-tx = create_tx(...)
+lr = linear_scheduler_with_warmup(...)
+tx = create_tx(lr, ...)
 
 state = train_state.TrainState.create(..., tx=tx)
 state = trainer.train(state, train_data, val_data)
