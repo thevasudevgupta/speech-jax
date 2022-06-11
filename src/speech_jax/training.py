@@ -1,4 +1,3 @@
-from pydantic import BaseModel, Field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -11,12 +10,10 @@ from flax import jax_utils, struct
 from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
+from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
 from .data_utils import HFIterableDataLoader
-
-# from huggingface_hub import Repository
-
 
 PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
@@ -29,6 +26,7 @@ class TrainingStepOutput:
     state: train_state.TrainState
     dropout_rng: jnp.DeviceArray
     loss: jnp.DeviceArray
+
 
 @struct.dataclass
 class ValidationStepOutput:
@@ -48,7 +46,8 @@ class Trainer(BaseModel):
     config: TrainerConfig
     training_step: Callable
     validation_step: Callable
-    pmap_kwargs: Dict[str, Any] = {}
+    train_pmap_kwargs: Dict[str, Any] = {}
+    val_pmap_kwargs: Dict[str, Any] = {}
     collate_fn: Optional[Callable] = None
     lr_scheduler: Callable = None
 
@@ -62,7 +61,9 @@ class Trainer(BaseModel):
         val_data: IterableDataset,
         seed: int = 0,
     ):
-        logger = wandb.init(project=self.config.wandb_project_name, config=self.config.dict())
+        logger = wandb.init(
+            project=self.config.wandb_project_name, config=self.config.dict()
+        )
         # jax.start_trace("./tensorboard")
 
         train_batch_size = self.config.train_batch_size_per_device * jax.device_count()
@@ -78,8 +79,8 @@ class Trainer(BaseModel):
         )
 
         state = jax_utils.replicate(state)
-        training_step = jax.pmap(self.training_step, **self.pmap_kwargs)
-        validation_step = jax.pmap(self.validation_step, **self.pmap_kwargs)
+        training_step = jax.pmap(self.training_step, **self.train_pmap_kwargs)
+        validation_step = jax.pmap(self.validation_step, **self.val_pmap_kwargs)
 
         rng = jax.random.PRNGKey(seed)
         dropout_rng = jax.random.split(rng, jax.device_count())
@@ -94,7 +95,7 @@ class Trainer(BaseModel):
 
                 # TODO: logging old step lr
                 lr = self.lr_scheduler(jax_utils.unreplicate(state.step))
-                
+
                 outputs = training_step(state, dropout_rng, batch)
                 state, dropout_rng = outputs.state, outputs.dropout_rng
                 loss = jax_utils.unreplicate(outputs.loss)
@@ -104,17 +105,18 @@ class Trainer(BaseModel):
 
                 if (step + 1) % self.config.logging_steps == 0:
                     logs = {
-                            "tr_loss": tr_loss.item() / self.config.logging_steps,
-                            "avg_tr_loss": avg_tr_loss.item() / (step + 1),
-                            "lr": lr.item(),
-                        }
+                        "tr_loss": tr_loss.item() / self.config.logging_steps,
+                        "avg_tr_loss": avg_tr_loss.item() / (step + 1),
+                        "lr": lr.item(),
+                    }
                     pbar.set_postfix(**logs)
                     logger.log(logs)
                     tr_loss = jnp.array(0)
 
             if self.config.epochs_save_dir is not None:
                 self.save_checkpoint(
-                    jax_utils.unreplicate(state), Path(self.config.epochs_save_dir, f"epoch-{epoch}")
+                    jax_utils.unreplicate(state),
+                    Path(self.config.epochs_save_dir, f"epoch-{epoch}"),
                 )
 
             val_steps, val_loss = 0, jnp.array(0)

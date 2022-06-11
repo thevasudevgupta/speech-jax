@@ -1,7 +1,6 @@
-from pydantic import BaseModel
+import dataclasses
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import dataclasses
 
 import flax
 import jax
@@ -9,6 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 from flax.training import train_state
+from pydantic import BaseModel
 from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
                           Wav2Vec2FeatureExtractor)
 from transformers.models.wav2vec2.modeling_flax_wav2vec2 import \
@@ -28,7 +28,11 @@ class TrainState(train_state.TrainState):
     get_feat_extract_output_lengths: Callable = flax.struct.field(pytree_node=False)
 
 
-def training_step(state: train_state.TrainState, dropout_rng: jnp.DeviceArray, batch: Dict[str, jnp.DeviceArray]) -> TrainingStepOutput:
+def training_step(
+    state: train_state.TrainState,
+    dropout_rng: jnp.DeviceArray,
+    batch: Dict[str, jnp.DeviceArray],
+) -> TrainingStepOutput:
     new_drp_rng, drp_rng = jax.random.split(dropout_rng, num=2)
 
     def loss_fn(params):
@@ -68,7 +72,9 @@ def training_step(state: train_state.TrainState, dropout_rng: jnp.DeviceArray, b
     )
 
 
-def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]) -> ValidationStepOutput:
+def validation_step(
+    state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]
+) -> ValidationStepOutput:
 
     labels = batch.pop("labels")
     label_paddings = batch.pop("label_paddings")
@@ -93,6 +99,7 @@ class SpecAugmentConfig(BaseModel):
     mask_time_prob: float = 0.05
     mask_time_span: int = 10
     min_masks: int = 0
+
 
 @dataclasses.dataclass
 class DataCollator:
@@ -195,18 +202,7 @@ collate_fn = DataCollator(
 )
 
 
-def hf_save_fn(
-    save_dir,
-    params,
-    model_save_fn,
-    feature_extractor_save_fn,
-    tokenizer_save_fn,
-    push_to_hub=False,
-):
-    model_save_fn(save_dir, params=params, push_to_hub=push_to_hub)
-    feature_extractor_save_fn(save_dir, push_to_hub=push_to_hub)
-    tokenizer_save_fn(save_dir, push_to_hub=push_to_hub)
-
+from speech_jax.hf_utils import hf_save_fn
 
 save_fn = partial(
     hf_save_fn,
@@ -217,27 +213,16 @@ save_fn = partial(
 )
 
 import optax
-def scheduler_fn(lr, init_lr, warmup_steps, num_train_steps):
-    decay_steps = num_train_steps - warmup_steps
-    warmup_fn = optax.linear_schedule(
-        init_value=init_lr, end_value=lr, transition_steps=warmup_steps
-    )
-    decay_fn = optax.linear_schedule(
-        init_value=lr, end_value=1e-7, transition_steps=decay_steps
-    )
-    lr = optax.join_schedules(
-        schedules=[warmup_fn, decay_fn], boundaries=[warmup_steps]
-    )
-    return lr
+from speech_jax.tx_utils import linear_scheduler_with_warmup
 
-lr_scheduler = scheduler_fn(trainer_config.lr, 0.0, 4000*2, 15000*20)
-
+lr_scheduler = linear_scheduler_with_warmup(trainer_config.lr, 0.0, 4000 * 2, 15000 * 20)
 
 trainer = training.Trainer(
     config=trainer_config,
     training_step=training_step,
     validation_step=validation_step,
-    pmap_kwargs={"axis_name": "batch", "donate_argnums": (0,)},
+    train_pmap_kwargs={"axis_name": "batch", "donate_argnums": (0,)},
+    val_pmap_kwargs={"axis_name": "batch"},
     collate_fn=collate_fn,
     model_save_fn=save_fn,
     lr_scheduler=lr_scheduler,

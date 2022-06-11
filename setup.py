@@ -5,8 +5,22 @@ import setuptools
 with open("readme.md", "r", encoding="utf-8") as file:
     long_description = file.read()
 
-with open("requirements.txt", "r", encoding="utf-8") as file:
-    install_requires = [p.strip() for p in file]
+install_requires = [
+    "pydantic",
+    "flax",
+    "optax",
+    "wandb",
+    "tqdm",
+    "pyyaml",
+    "huggingface_hub",
+]
+common_requires = [
+    "transformers",
+    "datasets",
+    "soundfile",
+    "librosa",
+]
+dev_requires = ["black", "isort", "flake8"]
 
 setuptools.setup(
     name="speech_jax",
@@ -21,6 +35,10 @@ setuptools.setup(
     package_dir={"": "src"},
     packages=setuptools.find_packages("src"),
     install_requires=install_requires,
+    extra_require={
+        "common": common_requires,
+        "dev": dev_requires,
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: Apache Software License",
