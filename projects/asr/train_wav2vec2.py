@@ -163,13 +163,13 @@ model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
 
 trainer_config = TrainerConfig(
     max_epochs=20,
-    lr=1e-5,
-    weight_decay=1e-3,
+    lr=2e-5,
+    weight_decay=1e-2,
     train_batch_size_per_device=1,
     eval_batch_size_per_device=1,  # TODO this is not supported
     wandb_project_name="speech-JAX",
-    epochs_save_dir="epochs-100h-better-scheduler_last",
-    logging_steps=64,
+    epochs_save_dir="epochs-960h",
+    logging_steps=256,
 )
 
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
@@ -230,7 +230,7 @@ def scheduler_fn(lr, init_lr, warmup_steps, num_train_steps):
     )
     return lr
 
-lr_scheduler = scheduler_fn(trainer_config.lr, 0.0, 3567*2, 3567*20)
+lr_scheduler = scheduler_fn(trainer_config.lr, 0.0, 4000*2, 15000*20)
 
 
 trainer = training.Trainer(
@@ -247,8 +247,8 @@ from datasets import interleave_datasets, load_dataset
 
 train_data = [
     load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
-    # load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
-    # load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
+    load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
+    load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
 ]
 train_data = interleave_datasets(train_data)
 val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
