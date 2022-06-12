@@ -1,4 +1,5 @@
 import dataclasses
+import sys
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -7,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+from datasets import interleave_datasets, load_dataset
 from flax.training import train_state
 from pydantic import BaseModel
 from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
@@ -15,21 +17,18 @@ from transformers.models.wav2vec2.modeling_flax_wav2vec2 import \
     _compute_mask_indices
 
 from speech_jax import training
+from speech_jax.hf_utils import hf_save_fn
 from speech_jax.training import (TrainerConfig, TrainingStepOutput,
                                  ValidationStepOutput)
-from speech_jax.tx_utils import create_tx
+from speech_jax.tx_utils import create_tx, linear_scheduler_with_warmup
 from speech_jax.utils import read_yaml
-from speech_jax.hf_utils import hf_save_fn
-import optax
-from speech_jax.tx_utils import linear_scheduler_with_warmup
-from datasets import interleave_datasets, load_dataset
-import sys
 
 # python3 projects/finetune_wav2vec2.py "projects/configs/wav2vec2_asr"
 
 print(jax.devices())
 configs = read_yaml(sys.args[1])
 print(configs)
+
 
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
