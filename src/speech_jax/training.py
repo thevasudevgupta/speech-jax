@@ -121,7 +121,7 @@ class Trainer(BaseModel):
                     logger.log(logs)
                     tr_loss = jnp.array(0)
 
-                if (step + 1) >= self.config.max_steps_per_epoch:
+                if (step + 1) == self.config.max_steps_per_epoch:
                     break
 
             if self.config.epochs_save_dir is not None:
