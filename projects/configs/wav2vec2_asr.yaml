@@ -1,20 +1,21 @@
 trainer:
-  max_epochs: 20
-  batch_size_per_device: 1
+  max_epochs: 15
+  batch_size_per_device: 2
   wandb_project_name: 'speech-JAX'
-  epochs_save_dir: 'epochs-960h'
-  logging_steps: 256
+  epochs_save_dir: 'final-960h'
+  logging_steps: 64
+  max_steps_per_epoch: 10
 
 optax:
-  lr: 2e-5
+  lr: 3e-5
   weight_decay: 1e-2
   init_lr: 0.0
-  warmup_steps: 8000
-  num_steps: 300000
+  warmup_steps: 16053 # 5351 * 3
+  num_steps: 80265 # 5351 * 15
 
 datacollator:
-  mask_time_prob: 0.1
-  mask_time_span: 10
+  mask_time_prob: 0.05
+  mask_time_span: 15
   min_masks: 20
   audio_maxlen: 384000
   text_maxlen: 384
@@ -27,4 +28,4 @@ data:
 
 model:
   pretrained_id: facebook/wav2vec2-large-lv60
-  
+

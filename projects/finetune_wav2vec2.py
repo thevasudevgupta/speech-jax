@@ -26,14 +26,14 @@ from speech_jax.utils import read_yaml
 # python3 projects/finetune_wav2vec2.py "projects/configs/wav2vec2_asr"
 
 print(jax.devices())
-configs = read_yaml(sys.args[1])
+configs = read_yaml(sys.argv[1])
 print(configs)
 
 
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
     get_feat_extract_output_lengths: Callable = flax.struct.field(pytree_node=False)
-    lr_scheduler: Callable = flax.struct.field(pynode_tree=False)
+    lr_scheduler: Callable = flax.struct.field(pytree_node=False)
 
 
 def training_step(
@@ -68,6 +68,9 @@ def training_step(
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(state.params)
 
+    print("loss", loss)
+    print("grads", grads)
+
     grads = jax.lax.pmean(grads, axis_name="batch")
     new_state = state.apply_gradients(grads=grads)
 
@@ -75,7 +78,7 @@ def training_step(
         state=new_state,
         dropout_rng=new_drp_rng,
         loss=jax.lax.pmean(loss, axis_name="batch"),
-        lr=state.lr_scheduler(state.step),
+        # lr=state.lr_scheduler(state.step),
     )
 
 
@@ -218,7 +221,7 @@ train_data = interleave_datasets(
             split=split.split(".", 1)[1],
             streaming=configs["data"]["streaming"],
         )
-        for split in configs["data"]["train_splits"]
+        for split in configs["data"]["train"]
     ]
 )
 val_data = interleave_datasets(

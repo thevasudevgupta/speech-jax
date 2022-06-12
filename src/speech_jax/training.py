@@ -28,7 +28,7 @@ class TrainingStepOutput:
 
     # following are used only for logging purposes
     loss: jnp.DeviceArray
-    lr: Optional[jnp.DeviceArray] = None
+    # lr: Optional[jnp.DeviceArray] = None
 
 
 @struct.dataclass
@@ -42,6 +42,7 @@ class TrainerConfig(BaseModel):
     wandb_project_name: str = "speech_jax"
     epochs_save_dir: Optional[str] = None
     logging_steps: int = 1
+    max_steps_per_epoch: int = -1
 
     @classmethod
     def from_dict(cls, dictionary: Dict[str, Any]) -> "TrainerConfig":
@@ -71,7 +72,7 @@ class Trainer(BaseModel):
         logger = wandb.init(
             project=self.config.wandb_project_name, config=wandb_configs
         )
-        jax.start_trace("./tensorboard")
+        # jax.profiler.start_trace("./tensorboard")
 
         batch_size = self.config.batch_size_per_device * jax.device_count()
 
@@ -118,6 +119,9 @@ class Trainer(BaseModel):
                     logger.log(logs)
                     tr_loss = jnp.array(0)
 
+                if (step + 1) >= self.config.max_steps_per_epoch:
+                    break
+
             if self.config.epochs_save_dir is not None:
                 self.save_checkpoint(
                     jax_utils.unreplicate(state),
@@ -132,7 +136,7 @@ class Trainer(BaseModel):
                 val_steps += 1
             logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})
 
-        jax.stop_trace()
+        # jax.profiler.stop_trace()
 
         return jax_utils.unreplicate(state)
 
