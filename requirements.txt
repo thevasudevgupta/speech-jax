@@ -1,8 +1,0 @@
-# jax[cpu]
-pydantic
-flax
-optax
-wandb
-tqdm
-pyyaml
-huggingface_hub

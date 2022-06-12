@@ -1,4 +1,3 @@
-from pydantic import BaseModel, Field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
@@ -11,11 +10,10 @@ from flax import jax_utils, struct
 from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
+from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
 from .data_utils import HFIterableDataLoader
-
-
 
 PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
@@ -27,6 +25,8 @@ TRAINING_STATE_PATH = "training_state.yaml"
 class TrainingStepOutput:
     state: train_state.TrainState
     dropout_rng: jnp.DeviceArray
+
+    # following are used only for logging purposes
     loss: jnp.DeviceArray
     lr: Optional[jnp.DeviceArray] = None
 
@@ -38,10 +38,14 @@ class ValidationStepOutput:
 class TrainerConfig(BaseModel):
     max_epochs: int
     batch_size_per_device: int
-    wandb_project_name: str
+    wandb_project_name: str = "speech_jax"
     epochs_save_dir: Optional[str] = None
-    logging_steps: int
+    logging_steps: int = 1
     max_steps_per_epoch: int = -1
+
+    @classmethod
+    def from_dict(cls, dictionary: Dict[str, Any]) -> "TrainerConfig":
+        return cls(**dictionary)
 
 
 class Trainer(BaseModel):
@@ -64,7 +68,10 @@ class Trainer(BaseModel):
         seed: int = 0,
     ):
         wandb_configs = wandb_configs or self.config.dict()
-        logger = wandb.init(project=self.config.wandb_project_name, config=wandb_configs)
+        logger = wandb.init(
+            project=self.config.wandb_project_name, config=wandb_configs
+        )
+
         # jax.profiler.start_trace("./tensorboard")
 
         batch_size = self.config.batch_size_per_device * jax.device_count()
@@ -102,9 +109,9 @@ class Trainer(BaseModel):
 
                 if (step + 1) % self.config.logging_steps == 0:
                     logs = {
-                            "tr_loss": tr_loss.item() / self.config.logging_steps,
-                            "avg_tr_loss": avg_tr_loss.item() / (step + 1),
-                        }
+                        "tr_loss": tr_loss.item() / self.config.logging_steps,
+                        "avg_tr_loss": avg_tr_loss.item() / (step + 1),
+                    }
                     if outputs.lr is not None:
                         logs["lr"] = jax_utils.unreplicate(outputs.lr).item()
 
@@ -117,7 +124,8 @@ class Trainer(BaseModel):
 
             if self.config.epochs_save_dir is not None:
                 self.save_checkpoint(
-                    jax_utils.unreplicate(state), Path(self.config.epochs_save_dir, f"epoch-{epoch}")
+                    jax_utils.unreplicate(state),
+                    Path(self.config.epochs_save_dir, f"epoch-{epoch}"),
                 )
 
             val_steps, val_loss = 0, jnp.array(0)

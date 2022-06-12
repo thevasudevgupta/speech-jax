@@ -1,4 +1,4 @@
-dir := src experiments
+dir := src projects
 
 style:
 	black $(dir)
