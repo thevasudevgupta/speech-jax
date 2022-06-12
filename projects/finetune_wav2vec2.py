@@ -165,8 +165,7 @@ trainer_config = TrainerConfig(
     max_epochs=20,
     lr=2e-5,
     weight_decay=1e-2,
-    train_batch_size_per_device=1,
-    eval_batch_size_per_device=1,  # TODO this is not supported
+    batch_size_per_device=1,
     wandb_project_name="speech-JAX",
     epochs_save_dir="epochs-960h",
     logging_steps=256,
@@ -176,14 +175,14 @@ feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
 tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
 
 audio_maxlen, text_maxlen = 384000, 384
-train_batch_size = trainer_config.train_batch_size_per_device * jax.device_count()
+batch_size = trainer_config.batch_size_per_device * jax.device_count()
 spec_augment_config = SpecAugmentConfig(
-    shape=(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen)),
+    shape=(batch_size, model._get_feat_extract_output_lengths(audio_maxlen)),
     mask_time_prob=0.1,
     mask_time_span=10,
     min_masks=20,
 )
-print(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen))
+print(batch_size, model._get_feat_extract_output_lengths(audio_maxlen))
 
 collate_fn = DataCollator(
     feature_extractor,
