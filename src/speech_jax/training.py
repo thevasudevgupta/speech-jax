@@ -9,7 +9,7 @@ from flax import jax_utils, struct
 from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from tqdm.auto import tqdm
 
 import wandb
