@@ -3,7 +3,6 @@ from typing import Any, Callable, Dict, Optional, Union
 
 import jax
 import jax.numpy as jnp
-import wandb
 import yaml
 from datasets import IterableDataset
 from flax import jax_utils, struct
@@ -12,6 +11,8 @@ from flax.training import train_state
 from flax.training.common_utils import shard
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
+
+import wandb
 
 from .data_utils import HFIterableDataLoader
 
@@ -29,6 +30,7 @@ class TrainingStepOutput:
     # following are used only for logging purposes
     loss: jnp.DeviceArray
     lr: Optional[jnp.DeviceArray] = None
+
 
 @struct.dataclass
 class ValidationStepOutput:
@@ -72,7 +74,7 @@ class Trainer(BaseModel):
             project=self.config.wandb_project_name, config=wandb_configs
         )
 
-        # jax.profiler.start_trace("./tensorboard")
+        jax.profiler.start_trace("./tensorboard")
 
         batch_size = self.config.batch_size_per_device * jax.device_count()
 
@@ -136,7 +138,7 @@ class Trainer(BaseModel):
                 val_steps += 1
             logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})
 
-        # jax.profiler.stop_trace()
+        jax.profiler.stop_trace()
 
         return jax_utils.unreplicate(state)
 

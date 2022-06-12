@@ -2,10 +2,6 @@ import dataclasses
 import sys
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from pydantic import BaseModel
-from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple
-import dataclasses
 
 import flax
 import jax
@@ -15,11 +11,9 @@ import optax
 from datasets import interleave_datasets, load_dataset
 from flax.training import train_state
 from pydantic import BaseModel
-from flax.training import train_state
-from transformers import (FlaxWav2Vec2ForCTC, Wav2Vec2CTCTokenizer,
-                          Wav2Vec2FeatureExtractor)
-from transformers.models.wav2vec2.modeling_flax_wav2vec2 import \
-    _compute_mask_indices
+from transformers import Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor
+from transformers.models.wav2vec2.modeling_flax_wav2vec2 import (
+    FlaxWav2Vec2ForCTC, _compute_mask_indices)
 
 from speech_jax import training
 from speech_jax.hf_utils import hf_save_fn
@@ -28,9 +22,10 @@ from speech_jax.training import (TrainerConfig, TrainingStepOutput,
 from speech_jax.tx_utils import create_tx, linear_scheduler_with_warmup
 from speech_jax.utils import read_yaml
 
-# python3 projects/finetune_wav2vec2.py "projects/configs/wav2vec2_asr"
+# python3 finetune_wav2vec2.py configs/wav2vec2_asr
 
 print(jax.devices())
+
 configs = read_yaml(sys.argv[1])
 print(configs)
 
@@ -40,7 +35,12 @@ class TrainState(train_state.TrainState):
     get_feat_extract_output_lengths: Callable = flax.struct.field(pytree_node=False)
     lr_scheduler: Callable = flax.struct.field(pytree_node=False)
 
-def training_step(state: train_state.TrainState, dropout_rng: jnp.DeviceArray, batch: Dict[str, jnp.DeviceArray]) -> TrainingStepOutput:
+
+def training_step(
+    state: train_state.TrainState,
+    dropout_rng: jnp.DeviceArray,
+    batch: Dict[str, jnp.DeviceArray],
+) -> TrainingStepOutput:
     new_drp_rng, drp_rng = jax.random.split(dropout_rng, num=2)
 
     def loss_fn(params):
@@ -80,7 +80,9 @@ def training_step(state: train_state.TrainState, dropout_rng: jnp.DeviceArray, b
     )
 
 
-def validation_step(state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]) -> ValidationStepOutput:
+def validation_step(
+    state: train_state.TrainState, batch: Dict[str, jnp.DeviceArray]
+) -> ValidationStepOutput:
 
     labels = batch.pop("labels")
     label_paddings = batch.pop("label_paddings")
@@ -105,6 +107,7 @@ class SpecAugmentConfig(BaseModel):
     mask_time_prob: float
     mask_time_span: int
     min_masks: int
+
 
 @dataclasses.dataclass
 class DataCollator:

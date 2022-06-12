@@ -2,9 +2,9 @@ trainer:
   max_epochs: 15
   batch_size_per_device: 2
   wandb_project_name: 'speech-JAX'
-  epochs_save_dir: 'final-960h'
+  epochs_save_dir: 'jax-wav2vec2-960h'
   logging_steps: 64
-  max_steps_per_epoch: 10
+  max_steps_per_epoch: -1
 
 optax:
   lr: 3.e-5
@@ -28,4 +28,3 @@ data:
 
 model:
   pretrained_id: facebook/wav2vec2-large-lv60
-
