@@ -15,7 +15,6 @@ from tqdm.auto import tqdm
 
 from .data_utils import HFIterableDataLoader
 
-# from huggingface_hub import Repository
 
 
 PathType = Union[Path, str]
@@ -37,20 +36,20 @@ class ValidationStepOutput:
 
 class TrainerConfig(BaseModel):
     max_epochs: int
-    train_batch_size_per_device: int
-    eval_batch_size_per_device: int
+    batch_size_per_device: int
     wandb_project_name: str
     epochs_save_dir: Optional[str] = None
     logging_steps: int
+    max_steps_per_epoch: int = -1
 
 
 class Trainer(BaseModel):
     config: TrainerConfig
     training_step: Callable
     validation_step: Callable
-    pmap_kwargs: Dict[str, Any] = {}
+    train_pmap_kwargs: Dict[str, Any] = {}
+    val_pmap_kwargs: Dict[str, Any] = {}
     collate_fn: Optional[Callable] = None
-    lr_scheduler: Callable = None
 
     # input signature has `save_dir` & `params`
     model_save_fn: Optional[Callable] = None
@@ -60,26 +59,27 @@ class Trainer(BaseModel):
         state: train_state.TrainState,
         train_data: IterableDataset,
         val_data: IterableDataset,
+        wandb_configs: Optional[Dict[str, Any]] = None,
         seed: int = 0,
     ):
-        logger = wandb.init(project=self.config.wandb_project_name, config=self.config.dict())
-        # jax.start_trace("./tensorboard")
+        wandb_configs = wandb_configs or self.config.dict()
+        logger = wandb.init(project=self.config.wandb_project_name, config=wandb_configs)
+        # jax.profiler.start_trace("./tensorboard")
 
-        train_batch_size = self.config.train_batch_size_per_device * jax.device_count()
-        eval_batch_size = self.config.eval_batch_size_per_device * jax.device_count()
+        batch_size = self.config.batch_size_per_device * jax.device_count()
 
         train_data = HFIterableDataLoader(
-            train_data, batch_size=train_batch_size, collate_fn=self.collate_fn
+            train_data, batch_size=batch_size, collate_fn=self.collate_fn
         )
         train_data.shuffle(seed)
 
         val_data = HFIterableDataLoader(
-            val_data, batch_size=eval_batch_size, collate_fn=self.collate_fn
+            val_data, batch_size=batch_size, collate_fn=self.collate_fn
         )
 
         state = jax_utils.replicate(state)
-        training_step = jax.pmap(self.training_step, **self.pmap_kwargs)
-        validation_step = jax.pmap(self.validation_step, **self.pmap_kwargs)
+        training_step = jax.pmap(self.training_step, **self.train_pmap_kwargs)
+        validation_step = jax.pmap(self.validation_step, **self.val_pmap_kwargs)
 
         rng = jax.random.PRNGKey(seed)
         dropout_rng = jax.random.split(rng, jax.device_count())
@@ -112,6 +112,9 @@ class Trainer(BaseModel):
                     logger.log(logs)
                     tr_loss = jnp.array(0)
 
+                if (step + 1) >= self.config.max_steps_per_epoch:
+                    break
+
             if self.config.epochs_save_dir is not None:
                 self.save_checkpoint(
                     jax_utils.unreplicate(state), Path(self.config.epochs_save_dir, f"epoch-{epoch}")
@@ -125,7 +128,7 @@ class Trainer(BaseModel):
                 val_steps += 1
             logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})
 
-        # jax.stop_trace()
+        # jax.profiler.stop_trace()
 
         return jax_utils.unreplicate(state)
 
@@ -133,22 +136,11 @@ class Trainer(BaseModel):
         self,
         state: train_state.TrainState,
         ckpt_dir: PathType,
-        extra: Optional[Dict[str, Any]] = None,
     ) -> Path:
         # state must be unreplicated before passing it
 
         ckpt_dir = Path(ckpt_dir)
         ckpt_dir.mkdir(exist_ok=True, parents=True)
-
-        # repo = Repository(ckpt_dir, clone_from=self.config.clone_from, use_auth_token=True)
-        # with repo.commit("speech_jax 🔥"):
-
-        # training_state = {
-        #     "config": self.config.dict(),
-        #     "extra": extra,
-        # }
-        # with open(ckpt_dir / TRAINING_STATE_PATH, "w") as f:
-        #     yaml.dump(training_state, f)
 
         if self.model_save_fn is not None:
             self.model_save_fn(ckpt_dir, state.params)
