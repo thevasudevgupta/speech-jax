@@ -1,0 +1,30 @@
+trainer:
+  max_epochs: 20
+  batch_size_per_device: 1
+  wandb_project_name: 'speech-JAX'
+  epochs_save_dir: 'epochs-960h'
+  logging_steps: 256
+
+optax:
+  lr: 2e-5
+  weight_decay: 1e-2
+  init_lr: 0.0
+  warmup_steps: 8000
+  num_steps: 300000
+
+datacollator:
+  mask_time_prob: 0.1
+  mask_time_span: 10
+  min_masks: 20
+  audio_maxlen: 384000
+  text_maxlen: 384
+
+data:
+  streaming: true
+  name: librispeech_asr
+  train: [clean.train.100, clean.train.360, other.train.500]
+  validation: [clean]
+
+model:
+  pretrained_id: facebook/wav2vec2-large-lv60
+  

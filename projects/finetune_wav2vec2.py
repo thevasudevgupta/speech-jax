@@ -15,17 +15,26 @@ from transformers.models.wav2vec2.modeling_flax_wav2vec2 import \
     _compute_mask_indices
 
 from speech_jax import training
-from speech_jax.training import TrainingStepOutput, ValidationStepOutput
+from speech_jax.training import (TrainerConfig, TrainingStepOutput,
+                                 ValidationStepOutput)
 from speech_jax.tx_utils import create_tx
+from speech_jax.utils import read_yaml
+from speech_jax.hf_utils import hf_save_fn
+import optax
+from speech_jax.tx_utils import linear_scheduler_with_warmup
+from datasets import interleave_datasets, load_dataset
+import sys
 
-# TODO:
-# hf-flax spec augmentation is not that great
-# let's implement by ourselves
+# python3 projects/finetune_wav2vec2.py "projects/configs/wav2vec2_asr"
 
+print(jax.devices())
+configs = read_yaml(sys.args[1])
+print(configs)
 
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
     get_feat_extract_output_lengths: Callable = flax.struct.field(pytree_node=False)
+    lr_scheduler: Callable = flax.struct.field(pynode_tree=False)
 
 
 def training_step(
@@ -60,15 +69,14 @@ def training_step(
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(state.params)
 
-    loss = jax.lax.pmean(loss, axis_name="batch")
     grads = jax.lax.pmean(grads, axis_name="batch")
-
     new_state = state.apply_gradients(grads=grads)
 
     return TrainingStepOutput(
         state=new_state,
         dropout_rng=new_drp_rng,
-        loss=loss,
+        loss=jax.lax.pmean(loss, axis_name="batch"),
+        lr=state.lr_scheduler(state.step),
     )
 
 
@@ -96,9 +104,9 @@ def validation_step(
 
 class SpecAugmentConfig(BaseModel):
     shape: Tuple[int, int]
-    mask_time_prob: float = 0.05
-    mask_time_span: int = 10
-    min_masks: int = 0
+    mask_time_prob: float
+    mask_time_span: int
+    min_masks: int
 
 
 @dataclasses.dataclass
@@ -158,39 +166,22 @@ class DataCollator:
         return outputs
 
 
-class TrainerConfig(training.TrainerConfig):
-    lr: float
-    weight_decay: float
-
-
-print(jax.devices())
-
-model_id = "facebook/wav2vec2-large-lv60"
+model_id = configs["model"]["pretrained_id"]
 model = FlaxWav2Vec2ForCTC.from_pretrained(model_id)
-
-trainer_config = TrainerConfig(
-    max_epochs=20,
-    lr=2e-5,
-    weight_decay=1e-2,
-    train_batch_size_per_device=1,
-    eval_batch_size_per_device=1,  # TODO this is not supported
-    wandb_project_name="speech-JAX",
-    epochs_save_dir="epochs-960h",
-    logging_steps=256,
-)
-
 feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_id)
 tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(model_id)
 
-audio_maxlen, text_maxlen = 384000, 384
-train_batch_size = trainer_config.train_batch_size_per_device * jax.device_count()
+trainer_config = TrainerConfig.from_dict(configs["trainer"])
+batch_size = trainer_config.batch_size_per_device * jax.device_count()
+
+audio_maxlen = configs["datacollator"]["audio_maxlen"]
+text_maxlen = configs["datacollator"]["text_maxlen"]
 spec_augment_config = SpecAugmentConfig(
-    shape=(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen)),
-    mask_time_prob=0.1,
-    mask_time_span=10,
-    min_masks=20,
+    shape=(batch_size, model._get_feat_extract_output_lengths(audio_maxlen)),
+    mask_time_prob=configs["datacollator"]["mask_time_prob"],
+    mask_time_span=configs["datacollator"]["mask_time_span"],
+    min_masks=configs["datacollator"]["min_masks"],
 )
-print(train_batch_size, model._get_feat_extract_output_lengths(audio_maxlen))
 
 collate_fn = DataCollator(
     feature_extractor,
@@ -201,9 +192,6 @@ collate_fn = DataCollator(
     get_feat_extract_output_lengths=model._get_feat_extract_output_lengths,
 )
 
-
-from speech_jax.hf_utils import hf_save_fn
-
 save_fn = partial(
     hf_save_fn,
     model_save_fn=model.save_pretrained,
@@ -212,44 +200,58 @@ save_fn = partial(
     push_to_hub=False,
 )
 
-import optax
-
-from speech_jax.tx_utils import linear_scheduler_with_warmup
-
-lr_scheduler = linear_scheduler_with_warmup(
-    trainer_config.lr, 0.0, 4000 * 2, 15000 * 20
-)
-
 trainer = training.Trainer(
     config=trainer_config,
     training_step=training_step,
     validation_step=validation_step,
-    train_pmap_kwargs={"axis_name": "batch", "donate_argnums": (0,)},
+    train_pmap_kwargs={"axis_name": "batch", "donate_argnums": (0, 1)},
     val_pmap_kwargs={"axis_name": "batch"},
     collate_fn=collate_fn,
     model_save_fn=save_fn,
-    lr_scheduler=lr_scheduler,
 )
 
-from datasets import interleave_datasets, load_dataset
 
-train_data = [
-    load_dataset("librispeech_asr", "clean", split="train.100", streaming=True),
-    load_dataset("librispeech_asr", "clean", split="train.360", streaming=True),
-    load_dataset("librispeech_asr", "other", split="train.500", streaming=True),
-]
-train_data = interleave_datasets(train_data)
-val_data = load_dataset("librispeech_asr", "clean", split="validation", streaming=True)
+train_data = interleave_datasets(
+    [
+        load_dataset(
+            configs["data"]["name"],
+            split.split(".", 1)[0],
+            split=split.split(".", 1)[1],
+            streaming=configs["data"]["streaming"],
+        )
+        for split in configs["data"]["train_splits"]
+    ]
+)
+val_data = interleave_datasets(
+    [
+        load_dataset(
+            configs["data"]["name"],
+            split,
+            split="validation",
+            streaming=configs["data"]["streaming"],
+        )
+        for split in configs["data"]["validation"]
+    ]
+)
+
+lr_scheduler = linear_scheduler_with_warmup(
+    configs["optax"]["lr"],
+    configs["optax"]["init_lr"],
+    configs["optax"]["warmup_steps"],
+    configs["optax"]["num_steps"],
+)
+tx = create_tx(lr_scheduler, configs["optax"]["weight_decay"])
 
 state = TrainState.create(
     apply_fn=model.__call__,
     params=model.params,
-    tx=create_tx(lr_scheduler, trainer_config.weight_decay),
+    tx=tx,
     loss_fn=partial(optax.ctc_loss, blank_id=tokenizer.pad_token_id),
     get_feat_extract_output_lengths=model._get_feat_extract_output_lengths,
+    lr_scheduler=lr_scheduler,
 )
 
 try:
-    new_state = trainer.train(state, train_data, val_data)
+    new_state = trainer.train(state, train_data, val_data, wandb_configs=configs)
 except KeyboardInterrupt:
     print("Interrupting training through KEYBOARD!!")

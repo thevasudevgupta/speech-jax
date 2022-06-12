@@ -25,7 +25,10 @@ TRAINING_STATE_PATH = "training_state.yaml"
 class TrainingStepOutput:
     state: train_state.TrainState
     dropout_rng: jnp.DeviceArray
+
+    # following are used only for logging purposes
     loss: jnp.DeviceArray
+    lr: Optional[jnp.DeviceArray] = None
 
 
 @struct.dataclass
@@ -35,11 +38,14 @@ class ValidationStepOutput:
 
 class TrainerConfig(BaseModel):
     max_epochs: int
-    train_batch_size_per_device: int
-    eval_batch_size_per_device: int
-    wandb_project_name: str
+    batch_size_per_device: int
+    wandb_project_name: str = "speech_jax"
     epochs_save_dir: Optional[str] = None
-    logging_steps: int
+    logging_steps: int = 1
+
+    @classmethod
+    def from_dict(cls, dictionary: Dict[str, Any]) -> "TrainerConfig":
+        return cls(**dictionary)
 
 
 class Trainer(BaseModel):
@@ -49,7 +55,6 @@ class Trainer(BaseModel):
     train_pmap_kwargs: Dict[str, Any] = {}
     val_pmap_kwargs: Dict[str, Any] = {}
     collate_fn: Optional[Callable] = None
-    lr_scheduler: Callable = None
 
     # input signature has `save_dir` & `params`
     model_save_fn: Optional[Callable] = None
@@ -59,23 +64,24 @@ class Trainer(BaseModel):
         state: train_state.TrainState,
         train_data: IterableDataset,
         val_data: IterableDataset,
+        wandb_configs: Optional[Dict[str, Any]] = None,
         seed: int = 0,
     ):
+        wandb_configs = wandb_configs or self.config.dict()
         logger = wandb.init(
-            project=self.config.wandb_project_name, config=self.config.dict()
+            project=self.config.wandb_project_name, config=wandb_configs
         )
-        # jax.start_trace("./tensorboard")
+        jax.start_trace("./tensorboard")
 
-        train_batch_size = self.config.train_batch_size_per_device * jax.device_count()
-        eval_batch_size = self.config.eval_batch_size_per_device * jax.device_count()
+        batch_size = self.config.batch_size_per_device * jax.device_count()
 
         train_data = HFIterableDataLoader(
-            train_data, batch_size=train_batch_size, collate_fn=self.collate_fn
+            train_data, batch_size=batch_size, collate_fn=self.collate_fn
         )
         train_data.shuffle(seed)
 
         val_data = HFIterableDataLoader(
-            val_data, batch_size=eval_batch_size, collate_fn=self.collate_fn
+            val_data, batch_size=batch_size, collate_fn=self.collate_fn
         )
 
         state = jax_utils.replicate(state)
@@ -93,13 +99,10 @@ class Trainer(BaseModel):
             for step, batch in pbar:
                 batch = shard(batch)
 
-                # TODO: logging old step lr
-                lr = self.lr_scheduler(jax_utils.unreplicate(state.step))
-
                 outputs = training_step(state, dropout_rng, batch)
                 state, dropout_rng = outputs.state, outputs.dropout_rng
-                loss = jax_utils.unreplicate(outputs.loss)
 
+                loss = jax_utils.unreplicate(outputs.loss)
                 tr_loss += loss
                 avg_tr_loss += loss
 
@@ -107,8 +110,10 @@ class Trainer(BaseModel):
                     logs = {
                         "tr_loss": tr_loss.item() / self.config.logging_steps,
                         "avg_tr_loss": avg_tr_loss.item() / (step + 1),
-                        "lr": lr.item(),
                     }
+                    if outputs.lr is not None:
+                        logs["lr"] = jax_utils.unreplicate(outputs.lr).item()
+
                     pbar.set_postfix(**logs)
                     logger.log(logs)
                     tr_loss = jnp.array(0)
@@ -127,7 +132,7 @@ class Trainer(BaseModel):
                 val_steps += 1
             logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})
 
-        # jax.stop_trace()
+        jax.stop_trace()
 
         return jax_utils.unreplicate(state)
 
@@ -135,22 +140,11 @@ class Trainer(BaseModel):
         self,
         state: train_state.TrainState,
         ckpt_dir: PathType,
-        extra: Optional[Dict[str, Any]] = None,
     ) -> Path:
         # state must be unreplicated before passing it
 
         ckpt_dir = Path(ckpt_dir)
         ckpt_dir.mkdir(exist_ok=True, parents=True)
-
-        # repo = Repository(ckpt_dir, clone_from=self.config.clone_from, use_auth_token=True)
-        # with repo.commit("speech_jax 🔥"):
-
-        # training_state = {
-        #     "config": self.config.dict(),
-        #     "extra": extra,
-        # }
-        # with open(ckpt_dir / TRAINING_STATE_PATH, "w") as f:
-        #     yaml.dump(training_state, f)
 
         if self.model_save_fn is not None:
             self.model_save_fn(ckpt_dir, state.params)

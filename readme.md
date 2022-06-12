@@ -5,7 +5,7 @@
 | Model ID | WER (test-clean) |
 |----------|------------------|
 | [speech_jax_wav2vec2-large-lv60_100h](https://huggingface.co/vasudevgupta/speech_jax_wav2vec2-large-lv60_100h) | 5.5% |
-| [speech_jax_wav2vec2-large-lv60_960h](https://huggingface.co/vasudevgupta/speech_jax_wav2vec2-large-lv60_960h) |  |
+| [speech_jax_wav2vec2-large-lv60_960h](https://huggingface.co/vasudevgupta/speech_jax_wav2vec2-large-lv60_960h) | 3.38% |
 
 ## Running experiments
 
