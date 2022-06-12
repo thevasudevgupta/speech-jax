@@ -26,7 +26,7 @@ from speech_jax.tx_utils import create_tx
 class TrainState(train_state.TrainState):
     loss_fn: Callable = flax.struct.field(pytree_node=False)
     get_feat_extract_output_lengths: Callable = flax.struct.field(pytree_node=False)
-
+    lr_scheduler: Callable = flax.struct.field(pytree_node=False)
 
 def training_step(state: train_state.TrainState, dropout_rng: jnp.DeviceArray, batch: Dict[str, jnp.DeviceArray]) -> TrainingStepOutput:
     new_drp_rng, drp_rng = jax.random.split(dropout_rng, num=2)
@@ -56,7 +56,6 @@ def training_step(state: train_state.TrainState, dropout_rng: jnp.DeviceArray, b
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(state.params)
 
-    loss = jax.lax.pmean(loss, axis_name="batch")
     grads = jax.lax.pmean(grads, axis_name="batch")
 
     new_state = state.apply_gradients(grads=grads)
@@ -64,7 +63,8 @@ def training_step(state: train_state.TrainState, dropout_rng: jnp.DeviceArray, b
     return TrainingStepOutput(
         state=new_state,
         dropout_rng=new_drp_rng,
-        loss=loss,
+        loss=jax.lax.pmean(loss, axis_name="batch"),
+        lr=state.lr_scheduler(state.step),
     )
 
 
@@ -236,7 +236,8 @@ trainer = training.Trainer(
     config=trainer_config,
     training_step=training_step,
     validation_step=validation_step,
-    pmap_kwargs={"axis_name": "batch", "donate_argnums": (0,)},
+    train_pmap_kwargs={"axis_name": "batch", "donate_argnums": (0,)},
+    val_pmap_kwargs={"axis_name": "batch"},
     collate_fn=collate_fn,
     model_save_fn=save_fn,
     lr_scheduler=lr_scheduler,
@@ -258,6 +259,7 @@ state = TrainState.create(
     tx=create_tx(lr_scheduler, trainer_config.weight_decay),
     loss_fn=partial(optax.ctc_loss, blank_id=tokenizer.pad_token_id),
     get_feat_extract_output_lengths=model._get_feat_extract_output_lengths,
+    lr_scheduler=lr_scheduler,
 )
 
 try:

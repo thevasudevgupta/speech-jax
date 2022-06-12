@@ -28,6 +28,7 @@ class TrainingStepOutput:
     state: train_state.TrainState
     dropout_rng: jnp.DeviceArray
     loss: jnp.DeviceArray
+    lr: Optional[jnp.DeviceArray] = None
 
 @struct.dataclass
 class ValidationStepOutput:
@@ -92,13 +93,10 @@ class Trainer(BaseModel):
             for step, batch in pbar:
                 batch = shard(batch)
 
-                # TODO: logging old step lr
-                lr = self.lr_scheduler(jax_utils.unreplicate(state.step))
-                
                 outputs = training_step(state, dropout_rng, batch)
                 state, dropout_rng = outputs.state, outputs.dropout_rng
-                loss = jax_utils.unreplicate(outputs.loss)
 
+                loss = jax_utils.unreplicate(outputs.loss)
                 tr_loss += loss
                 avg_tr_loss += loss
 
@@ -106,8 +104,10 @@ class Trainer(BaseModel):
                     logs = {
                             "tr_loss": tr_loss.item() / self.config.logging_steps,
                             "avg_tr_loss": avg_tr_loss.item() / (step + 1),
-                            "lr": lr.item(),
                         }
+                    if outputs.lr is not None:
+                        logs["lr"] = jax_utils.unreplicate(outputs.lr).item()
+
                     pbar.set_postfix(**logs)
                     logger.log(logs)
                     tr_loss = jnp.array(0)
