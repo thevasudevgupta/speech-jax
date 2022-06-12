@@ -28,8 +28,7 @@ class TrainingStepOutput:
 
     # following are used only for logging purposes
     loss: jnp.DeviceArray
-    # lr: Optional[jnp.DeviceArray] = None
-
+    lr: Optional[jnp.DeviceArray] = None
 
 @struct.dataclass
 class ValidationStepOutput:
@@ -72,6 +71,7 @@ class Trainer(BaseModel):
         logger = wandb.init(
             project=self.config.wandb_project_name, config=wandb_configs
         )
+
         # jax.profiler.start_trace("./tensorboard")
 
         batch_size = self.config.batch_size_per_device * jax.device_count()

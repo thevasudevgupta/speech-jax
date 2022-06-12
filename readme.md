@@ -10,11 +10,14 @@
 ## Running experiments
 
 ```bash
+# switch to relevant directory
+cd projects
+
 # following command will finetune Wav2Vec2-large model on Librispeech-960h dataset
-python3 projects/finetune_wav2vec2.py
+python3 finetune_wav2vec2.py configs/wav2vec2_asr.yaml
 
 # following command will pre-train Wav2Vec2-base model on Librispeech-960h dataset
-python3 projects/pretrain_wav2vec2.py
+python3 pretrain_wav2vec2.py configs/wav2vec2.yaml
 
 # final model is saved in the huggingface format 
 # => you can load it directly using `FlaxAutoModel.from_pretrained`
