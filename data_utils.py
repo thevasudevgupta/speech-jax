@@ -3,14 +3,10 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import List, Tuple, Union
 
-import tensorflow as tf
-
 import soundfile as sf
+import tensorflow as tf
 from wav2vec2 import Wav2Vec2Processor
 
-
-SPEECH_DTYPE = tf.float32
-LABEL_DTYPE = tf.int32
 AUTOTUNE = tf.data.AUTOTUNE
 
 
@@ -50,10 +46,7 @@ class CommonDataLoader:
         self.tokenizer = Wav2Vec2Processor(is_tokenizer=True)
 
     def batchify(
-        self,
-        dataset: tf.data.Dataset,
-        seed: int = None,
-        drop_remainder: bool = True
+        self, dataset: tf.data.Dataset, seed: int = None, drop_remainder: bool = True
     ):
         # shuffling for training
         if seed is not None:
@@ -74,7 +67,7 @@ class CommonDataLoader:
 
     def restrict_to_maxlen(self, speech: tf.Tensor, labels: tf.Tensor):
         """This must be called before doing padding"""
-        speech, labels = speech[:self.audio_maxlen], labels[:self.labels_maxlen]
+        speech, labels = speech[: self.audio_maxlen], labels[: self.labels_maxlen]
         return speech, labels
 
     def _fetch_and_push_files(self, data_dir: str, file_paths: list, file_pattern: str):
@@ -156,7 +149,9 @@ class LibriSpeechDataLoader(CommonDataLoader):
 
         self._num_samples = None
 
-    def __call__(self, seed: int = None, drop_remainder: bool = True) -> tf.data.Dataset:
+    def __call__(
+        self, seed: int = None, drop_remainder: bool = True
+    ) -> tf.data.Dataset:
 
         if not self.from_tfrecords:
             dataset = self.build_and_fetch_dataset()
@@ -279,13 +274,15 @@ class TimitDataLoader(CommonDataLoader):
         self.wav_ext = ".WAV"
         self.txt_ext = ".TXT"
 
-    def __call__(self, seed: int = None, drop_remainder: bool = True) -> tf.data.Dataset:
+    def __call__(
+        self, seed: int = None, drop_remainder: bool = True
+    ) -> tf.data.Dataset:
         wav_files, txt_files = [], []
         self._fetch_and_push_files(self.data_dir, wav_files, self.wav_ext)
         self._fetch_and_push_files(self.data_dir, txt_files, self.txt_ext)
 
-        wav_files = set([f[:-len(self.wav_ext)] for f in wav_files])
-        txt_files = set([f[:-len(self.txt_ext)] for f in txt_files])
+        wav_files = set([f[: -len(self.wav_ext)] for f in wav_files])
+        txt_files = set([f[: -len(self.txt_ext)] for f in txt_files])
 
         # consider only those files which has both text & speech
         files = list(wav_files & txt_files)

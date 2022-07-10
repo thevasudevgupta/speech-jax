@@ -13,6 +13,8 @@ install_requires = [
     "tqdm",
     "pyyaml",
     "huggingface_hub",
+    # "jax",
+    # "tensorflow",
 ]
 common_requires = [
     "transformers",
@@ -45,5 +47,5 @@ setuptools.setup(
         "Operating System :: OS Independent",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    python_requires=">=3.7", # python-37 is necessary for running in colab
+    python_requires=">=3.7",  # python-37 is necessary for running in colab
 )

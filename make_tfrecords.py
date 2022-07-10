@@ -1,13 +1,20 @@
 import argparse
-import os
+from pathlib import Path
 
+import numpy as np
 import tensorflow as tf
-
-from data_utils import LABEL_DTYPE, SPEECH_DTYPE, LibriSpeechDataLoader, LibriSpeechDataLoaderArgs
+from datasets import load_dataset
 from tqdm.auto import tqdm
 
+SPEECH_DTYPE = tf.float32
+LABEL_DTYPE = tf.string
 
-def create_tfrecord(speech_tensor, label_tensor):
+CLEAN_SPLITS = ["train.100", "train.360", "validation", "test"]
+OTHER_SPLITS = ["train.500", "validation", "test"]
+# python3 make_tfrecords.py -c clean -s validation
+
+
+def create_tfrecord(speech_tensor: tf.Tensor, label_tensor: tf.Tensor):
     speech_tensor = tf.cast(speech_tensor, SPEECH_DTYPE)
     label_tensor = tf.cast(label_tensor, LABEL_DTYPE)
 
@@ -25,37 +32,46 @@ def create_tfrecord(speech_tensor, label_tensor):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        "CLI to convert .flac dataset into .tfrecords format"
+        "CLI to convert LibriSpeech dataset (from `huggingface-datasets`) to .tfrecords format"
     )
-    parser.add_argument("--data_dir", default="../data/LibriSpeech/dev-clean", type=str)
-    parser.add_argument("-d", "--tfrecord_dir", default="dev-clean", type=str)
+    parser.add_argument("-c", "--split_config", required=True, type=str)
+    parser.add_argument("-s", "--split_name", required=True, type=str)
+    parser.add_argument("-d", "--tfrecords_dir", default=None, type=str)
     parser.add_argument("-n", "--num_shards", default=1, type=int)
 
     args = parser.parse_args()
-    os.makedirs(args.tfrecord_dir, exist_ok=True)
 
-    data_args = LibriSpeechDataLoaderArgs(data_dir=args.data_dir)
-    dataloader = LibriSpeechDataLoader(data_args)
-    dataset = dataloader.build_and_fetch_dataset()
+    tfrecords_dir = Path(
+        f"{args.split_config}.{args.split_name}"
+        if args.tfrecords_dir is None
+        else args.tfrecord_dir
+    )
+    tfrecords_dir.mkdir(exist_ok=True, parents=True)
+
+    dataset = load_dataset("librispeech_asr", args.split_config, split=args.split_name)
+    print(dataset)
 
     # shards the TFrecords into several files (since overall dataset size is approx 280 GB)
     # this will help TFRecordDataset to read shards in parallel from several files
-    # Docs suggest to keep each shard around 100 MB in size, so choose num_shards accordingly
-    num_records_per_file = len(dataloader) // args.num_shards
+    # Docs suggest to keep each shard around 100 MB in size, so choose `num_shards` accordingly
+    num_records_per_file = len(dataset) // args.num_shards
     file_names = [
-        os.path.join(args.tfrecord_dir, f"{args.tfrecord_dir}-{i}.tfrecord")
+        str(tfrecords_dir / f"{tfrecords_dir}-{i}.tfrecord")
         for i in range(args.num_shards)
     ]
+
     writers = [tf.io.TFRecordWriter(file_name) for file_name in file_names]
 
     # following loops runs in O(n) time (assuming n = num_samples & for every tfrecord prepartion_take = O(1))
     i, speech_stats, label_stats = 0, [], []
-    pbar = tqdm(dataset, total=len(dataloader), desc=f"Preparing {file_names[i]} ... ")
+    pbar = tqdm(dataset, total=len(dataset), desc=f"Preparing {file_names[i]} ... ")
     for j, inputs in enumerate(pbar):
-        speech, label = inputs
-        speech, label = tf.squeeze(speech), tf.squeeze(label)
+        speech, label = inputs["audio"]["array"], inputs["text"]
+
         speech_stats.append(len(speech))
         label_stats.append(len(label))
+
+        speech, label = tf.convert_to_tensor(speech), tf.convert_to_tensor(label)
         tf_record = create_tfrecord(speech, label)
 
         writers[i].write(tf_record)
@@ -68,16 +84,18 @@ if __name__ == "__main__":
             pbar.set_description(f"Preparing {file_names[i]} ... ")
     writers[-1].close()
 
-    print(f"Total {len(dataloader)} tfrecords are sharded in `{args.tfrecord_dir}`")
+    print(f"Total {len(dataset)} tfrecords are sharded in `{tfrecords_dir}`")
     print("############# Data Stats #############")
     print(
         {
             "speech_min": min(speech_stats),
             "speech_mean": sum(speech_stats) / len(speech_stats),
             "speech_max": max(speech_stats),
+            "speech_std": np.std(speech_stats),
             "label_min": min(label_stats),
             "label_mean": sum(label_stats) / len(label_stats),
             "label_max": max(label_stats),
+            "label_std": np.std(label_stats),
         }
     )
     print("######################################")

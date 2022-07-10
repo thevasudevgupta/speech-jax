@@ -10,14 +10,13 @@ import numpy as np
 import optax
 from datasets import interleave_datasets, load_dataset
 from flax.training import train_state
-from pydantic import BaseModel
 from transformers import Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor
 from transformers.models.wav2vec2.modeling_flax_wav2vec2 import (
     FlaxWav2Vec2ForCTC, _compute_mask_indices)
 
 from speech_jax import training
 from speech_jax.hf_utils import hf_save_fn
-from speech_jax.training import (TrainerConfig, TrainingStepOutput,
+from speech_jax.training import (BaseConfig, TrainerConfig, TrainingStepOutput,
                                  ValidationStepOutput)
 from speech_jax.tx_utils import create_tx, linear_scheduler_with_warmup
 from speech_jax.utils import read_yaml
@@ -102,7 +101,7 @@ def validation_step(
     return ValidationStepOutput(loss=loss)
 
 
-class SpecAugmentConfig(BaseModel):
+class SpecAugmentConfig(BaseConfig):
     shape: Tuple[int, int]
     mask_time_prob: float
     mask_time_span: int
