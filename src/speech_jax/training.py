@@ -1,20 +1,21 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
+import datasets
 import jax
 import jax.numpy as jnp
 import pydantic
+import tensorflow as tf
 import wandb
 import yaml
-from datasets import IterableDataset
 from flax import jax_utils, struct
 from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
 from tqdm.auto import tqdm
 
-from .data_utils import HFIterableDataLoader
+from speech_jax.data_utils import IterableDataLoader
 
 PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
@@ -64,8 +65,8 @@ class Trainer:
     config: TrainerConfig
     training_step: Callable
     validation_step: Callable
-    train_pmap_kwargs: Dict[str, Any] = {}
-    val_pmap_kwargs: Dict[str, Any] = {}
+    train_pmap_kwargs: Dict[str, Any] = field(default_factory=dict)
+    val_pmap_kwargs: Dict[str, Any] = field(default_factory=dict)
     collate_fn: Optional[Callable] = None
 
     # input signature has `save_dir` & `params`
@@ -74,8 +75,8 @@ class Trainer:
     def train(
         self,
         state: train_state.TrainState,
-        train_data: Union[IterableDataset, tf.data.Dataset],
-        val_data: Union[IterableDataset, tf.data.Dataset],
+        train_data: Union[datasets.IterableDataset, tf.data.Dataset],
+        val_data: Union[datasets.IterableDataset, tf.data.Dataset],
         wandb_configs: Optional[Dict[str, Any]] = None,
         seed: int = 0,
     ):
@@ -88,14 +89,13 @@ class Trainer:
 
         batch_size = self.config.batch_size_per_device * jax.device_count()
 
-        # train_data = HFIterableDataLoader(
-        #     train_data, batch_size=batch_size, collate_fn=self.collate_fn
-        # )
-        # train_data.shuffle(seed)
+        train_data = IterableDataLoader(
+            train_data, batch_size=batch_size, collate_fn=self.collate_fn
+        )
 
-        # val_data = HFIterableDataLoader(
-        #     val_data, batch_size=batch_size, collate_fn=self.collate_fn
-        # )
+        val_data = IterableDataLoader(
+            val_data, batch_size=batch_size, collate_fn=self.collate_fn
+        )
 
         state = jax_utils.replicate(state)
         training_step = jax.pmap(self.training_step, **self.train_pmap_kwargs)
@@ -106,7 +106,7 @@ class Trainer:
 
         for epoch in range(self.config.max_epochs):
             tr_loss, avg_tr_loss = jnp.array(0), jnp.array(0)
-            train_data.set_epoch(epoch)
+            train_data.shuffle(epoch)
 
             pbar = tqdm(enumerate(train_data), desc=f"Running epoch-{epoch}")
             for step, batch in pbar:

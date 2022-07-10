@@ -37,6 +37,7 @@ def read_tfrecord(record: tf.train.Example):
     }
     record = tf.io.parse_single_example(record, desc)
 
+    # TODO: we should read tensor on cpu??
     speech = tf.io.parse_tensor(record["speech"], out_type=SPEECH_DTYPE)
     label = tf.io.parse_tensor(record["label"], out_type=LABEL_DTYPE)
 
