@@ -74,8 +74,8 @@ class Trainer:
     def train(
         self,
         state: train_state.TrainState,
-        train_data: IterableDataset,
-        val_data: IterableDataset,
+        train_data: Union[IterableDataset, tf.data.Dataset],
+        val_data: Union[IterableDataset, tf.data.Dataset],
         wandb_configs: Optional[Dict[str, Any]] = None,
         seed: int = 0,
     ):
@@ -88,14 +88,14 @@ class Trainer:
 
         batch_size = self.config.batch_size_per_device * jax.device_count()
 
-        train_data = HFIterableDataLoader(
-            train_data, batch_size=batch_size, collate_fn=self.collate_fn
-        )
-        train_data.shuffle(seed)
+        # train_data = HFIterableDataLoader(
+        #     train_data, batch_size=batch_size, collate_fn=self.collate_fn
+        # )
+        # train_data.shuffle(seed)
 
-        val_data = HFIterableDataLoader(
-            val_data, batch_size=batch_size, collate_fn=self.collate_fn
-        )
+        # val_data = HFIterableDataLoader(
+        #     val_data, batch_size=batch_size, collate_fn=self.collate_fn
+        # )
 
         state = jax_utils.replicate(state)
         training_step = jax.pmap(self.training_step, **self.train_pmap_kwargs)

@@ -11,7 +11,7 @@ LABEL_DTYPE = tf.string
 
 CLEAN_SPLITS = ["train.100", "train.360", "validation", "test"]
 OTHER_SPLITS = ["train.500", "validation", "test"]
-# python3 make_tfrecords.py -c clean -s validation
+# python3 src/speech_jax/make_tfrecords.py -c clean -s validation
 
 
 def create_tfrecord(speech_tensor: tf.Tensor, label_tensor: tf.Tensor):
@@ -28,6 +28,19 @@ def create_tfrecord(speech_tensor: tf.Tensor, label_tensor: tf.Tensor):
 
     example = tf.train.Example(features=tf.train.Features(feature=feature))
     return example.SerializeToString()
+
+
+def read_tfrecord(record: tf.train.Example):
+    desc = {
+        "speech": tf.io.FixedLenFeature((), tf.string),
+        "label": tf.io.FixedLenFeature((), tf.string),
+    }
+    record = tf.io.parse_single_example(record, desc)
+
+    speech = tf.io.parse_tensor(record["speech"], out_type=SPEECH_DTYPE)
+    label = tf.io.parse_tensor(record["label"], out_type=LABEL_DTYPE)
+
+    return speech, label
 
 
 if __name__ == "__main__":
