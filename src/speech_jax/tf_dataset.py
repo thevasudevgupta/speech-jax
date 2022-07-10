@@ -12,7 +12,9 @@ class TFDatasetReader:
     buffer_size: int = 10000
 
     def __post_init__(self):
-        dataset = tf.data.TFRecordDataset(self.tfrecords)
+        tfrecords = tf.io.gfile.glob(self.tfrecords)
+        print("Number of tfrecords:", len(tfrecords))
+        dataset = tf.data.TFRecordDataset(tfrecords)
         dataset = dataset.map(read_tfrecord, num_parallel_calls=tf.data.AUTOTUNE)
         self.dataset = dataset
 

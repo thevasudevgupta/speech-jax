@@ -25,8 +25,8 @@ data:
   # name: librispeech_asr
   # train: [clean.train.100, clean.train.360, other.train.500]
   # validation: [clean]
-  train: [../clean.test/clean.test-0.tfrecord]
-  validation: [../clean.test/clean.test-0.tfrecord]
+  train: [gs://librispeech_jax/clean.train.100/*tfrecord]
+  validation: [gs://librispeech_jax/clean.validation/*tfrecord]
 
 model:
   pretrained_id: facebook/wav2vec2-large-lv60
