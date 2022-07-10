@@ -1,13 +1,16 @@
 from typing import Callable, Dict, Optional, Tuple, Union
 
+import datasets
 import jax.numpy as jnp
-from datasets import IterableDataset
+import tensorflow as tf
+
+from speech_jax.tf_dataset import TFDatasetReader
 
 
-class HFIterableDataLoader:
+class IterableDataLoader:
     def __init__(
         self,
-        dataset: IterableDataset,
+        dataset: Union[datasets.IterableDataset, TFDatasetReader],
         batch_size: int = 1,
         collate_fn: Optional[Callable] = None,
     ):
@@ -29,8 +32,5 @@ class HFIterableDataLoader:
                 yield batch
                 batch = []
 
-    def shuffle(self, seed):
-        self.dataset = self.dataset.shuffle(seed)
-
-    def set_epoch(self, epoch):
-        self.dataset.set_epoch(epoch)
+    def shuffle(self, seed: int):
+        self.dataset.set_epoch(seed)

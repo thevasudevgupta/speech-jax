@@ -1,20 +1,21 @@
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Union
 
+import datasets
 import jax
 import jax.numpy as jnp
+import pydantic
+import tensorflow as tf
+import wandb
 import yaml
-from datasets import IterableDataset
 from flax import jax_utils, struct
 from flax.serialization import from_bytes, to_bytes
 from flax.training import train_state
 from flax.training.common_utils import shard
-from pydantic import BaseModel
 from tqdm.auto import tqdm
 
-import wandb
-
-from .data_utils import HFIterableDataLoader
+from speech_jax.data_utils import IterableDataLoader
 
 PathType = Union[Path, str]
 OPTIMIZER_STATE_PATH = "optim_state.msgpack"
@@ -37,7 +38,16 @@ class ValidationStepOutput:
     loss: jnp.DeviceArray
 
 
-class TrainerConfig(BaseModel):
+class BaseConfig(pydantic.BaseModel):
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> "BaseConfig":
+        return cls(**config_dict)
+
+    def to_dict(self):
+        return self.dict()
+
+
+class TrainerConfig(BaseConfig):
     max_epochs: int
     batch_size_per_device: int
     wandb_project_name: str = "speech_jax"
@@ -50,12 +60,13 @@ class TrainerConfig(BaseModel):
         return cls(**dictionary)
 
 
-class Trainer(BaseModel):
+@dataclass
+class Trainer:
     config: TrainerConfig
     training_step: Callable
     validation_step: Callable
-    train_pmap_kwargs: Dict[str, Any] = {}
-    val_pmap_kwargs: Dict[str, Any] = {}
+    train_pmap_kwargs: Dict[str, Any] = field(default_factory=dict)
+    val_pmap_kwargs: Dict[str, Any] = field(default_factory=dict)
     collate_fn: Optional[Callable] = None
 
     # input signature has `save_dir` & `params`
@@ -64,26 +75,25 @@ class Trainer(BaseModel):
     def train(
         self,
         state: train_state.TrainState,
-        train_data: IterableDataset,
-        val_data: IterableDataset,
+        train_data: Union[datasets.IterableDataset, tf.data.Dataset],
+        val_data: Union[datasets.IterableDataset, tf.data.Dataset],
         wandb_configs: Optional[Dict[str, Any]] = None,
         seed: int = 0,
     ):
-        wandb_configs = wandb_configs or self.config.dict()
+        wandb_configs = wandb_configs or self.config.to_dict()
         logger = wandb.init(
             project=self.config.wandb_project_name, config=wandb_configs
         )
 
-        jax.profiler.start_trace("./tensorboard")
+        # jax.profiler.start_trace("./tensorboard")
 
         batch_size = self.config.batch_size_per_device * jax.device_count()
 
-        train_data = HFIterableDataLoader(
+        train_data = IterableDataLoader(
             train_data, batch_size=batch_size, collate_fn=self.collate_fn
         )
-        train_data.shuffle(seed)
 
-        val_data = HFIterableDataLoader(
+        val_data = IterableDataLoader(
             val_data, batch_size=batch_size, collate_fn=self.collate_fn
         )
 
@@ -96,7 +106,7 @@ class Trainer(BaseModel):
 
         for epoch in range(self.config.max_epochs):
             tr_loss, avg_tr_loss = jnp.array(0), jnp.array(0)
-            train_data.set_epoch(epoch)
+            train_data.shuffle(epoch)
 
             pbar = tqdm(enumerate(train_data), desc=f"Running epoch-{epoch}")
             for step, batch in pbar:
@@ -138,7 +148,7 @@ class Trainer(BaseModel):
                 val_steps += 1
             logger.log({"val_loss": val_loss.item() / val_steps, "epoch": epoch})
 
-        jax.profiler.stop_trace()
+        # jax.profiler.stop_trace()
 
         return jax_utils.unreplicate(state)
 

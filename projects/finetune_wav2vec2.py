@@ -10,19 +10,18 @@ import numpy as np
 import optax
 from datasets import interleave_datasets, load_dataset
 from flax.training import train_state
-from pydantic import BaseModel
 from transformers import Wav2Vec2CTCTokenizer, Wav2Vec2FeatureExtractor
 from transformers.models.wav2vec2.modeling_flax_wav2vec2 import (
     FlaxWav2Vec2ForCTC, _compute_mask_indices)
 
 from speech_jax import training
 from speech_jax.hf_utils import hf_save_fn
-from speech_jax.training import (TrainerConfig, TrainingStepOutput,
+from speech_jax.training import (BaseConfig, TrainerConfig, TrainingStepOutput,
                                  ValidationStepOutput)
 from speech_jax.tx_utils import create_tx, linear_scheduler_with_warmup
 from speech_jax.utils import read_yaml
 
-# python3 finetune_wav2vec2.py configs/wav2vec2_asr
+# python3 finetune_wav2vec2.py configs/wav2vec2_asr.yaml
 
 print(jax.devices())
 
@@ -102,7 +101,7 @@ def validation_step(
     return ValidationStepOutput(loss=loss)
 
 
-class SpecAugmentConfig(BaseModel):
+class SpecAugmentConfig(BaseConfig):
     shape: Tuple[int, int]
     mask_time_prob: float
     mask_time_span: int
@@ -119,8 +118,8 @@ class DataCollator:
     get_feat_extract_output_lengths: Callable = None
 
     def __call__(self, batch: List[Dict[str, Any]]):
-        audio = [sample["audio"]["array"] for sample in batch]
-        text = [sample["text"] for sample in batch]
+        audio = [sample[0].numpy() for sample in batch]
+        text = [sample[1].numpy().decode() for sample in batch]
 
         # TODO: explore other padding options in JAX (special dynamic padding?)
         audio = self.feature_extractor(
@@ -210,29 +209,10 @@ trainer = training.Trainer(
     model_save_fn=save_fn,
 )
 
+from speech_jax.tf_dataset import TFDatasetReader
 
-train_data = interleave_datasets(
-    [
-        load_dataset(
-            configs["data"]["name"],
-            split.split(".", 1)[0],
-            split=split.split(".", 1)[1],
-            streaming=configs["data"]["streaming"],
-        )
-        for split in configs["data"]["train"]
-    ]
-)
-val_data = interleave_datasets(
-    [
-        load_dataset(
-            configs["data"]["name"],
-            split,
-            split="validation",
-            streaming=configs["data"]["streaming"],
-        )
-        for split in configs["data"]["validation"]
-    ]
-)
+train_data = TFDatasetReader(configs["data"]["train"])
+val_data = TFDatasetReader(configs["data"]["validation"])
 
 lr_scheduler = linear_scheduler_with_warmup(
     configs["optax"]["lr"],
