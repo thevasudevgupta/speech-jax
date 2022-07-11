@@ -65,4 +65,5 @@ python3 finetune_wav2vec2.py configs/wav2vec2_asr.yaml
 
 ## Thank You
 
-* ML Google Developers Experts program and TPU Cloud Research for providing free TPU resources for experimentation
+* [Google Developers Experts](https://developers.google.com/community/experts) program for providing GCP credits
+* [TPU Cloud Research](https://sites.research.google/trc/about/) for providing free TPU resources
